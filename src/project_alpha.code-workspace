@@ -1,0 +1,17 @@
+{
+	"folders": [
+		{
+			"path": ".."
+		},
+		{
+			"path": "../../StockScanner"
+		},
+		{
+			"path": "../../volatile"
+		},
+		{
+			"path": "../../PKScreener"
+		}
+	],
+	"settings": {}
+}

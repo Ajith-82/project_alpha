@@ -501,5 +501,6 @@ if __name__ == "__main__":
         symbols = Index.nse_500()
     else:
         symbols = Index.sp_500()
+        #symbols = ['NFLX', 'GOOG', 'AAPL', 'META', 'AMZN']
     data = load_data(cache, symbols, market)
     volatile(args, data)

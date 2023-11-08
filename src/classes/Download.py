@@ -1,12 +1,11 @@
 #!/usr/bin/env python
 import os.path
 import pandas as pd
-import requests
 import multitasking
-import json
 import csv
 import numpy as np
 import datetime as dt
+from yahooquery import Ticker
 from typing import Union
 
 from Tools import ProgressBar
@@ -54,13 +53,13 @@ def download(market: str, tickers: list, start: Union[str, int] = None, end: Uni
     currencies = {}
 
     if end is None:
-        end = int(dt.datetime.timestamp(dt.datetime.today()))
+        end = dt.datetime.today().strftime('%Y-%m-%d')
     elif type(end) is str:
-        end = int(dt.datetime.timestamp(dt.datetime.strptime(end, '%Y-%m-%d')))
+        end = dt.datetime.strptime(end, '%Y-%m-%d')
     if start is None:
-        start = int(dt.datetime.timestamp(dt.datetime.today() - dt.timedelta(365)))
+        start = (dt.datetime.now() - dt.timedelta(365)).strftime('%Y-%m-%d')
     elif type(start) is str:
-        start = int(dt.datetime.timestamp(dt.datetime.strptime(start, '%Y-%m-%d')))
+        start = dt.datetime.strptime(start, '%Y-%m-%d')
 
     @multitasking.task
     def _download_one_threaded(market: str, ticker: str, start: str, end: str, interval: str = "1d"):
@@ -78,24 +77,38 @@ def download(market: str, tickers: list, start: Union[str, int] = None, end: Uni
         end: str
             End download data at this date.
         """
-        data_one = _download_one(market, ticker, start, end, interval)
-
+        ticker_data = download_stock_data(market, ticker, start, end, interval)
+        price_data = ticker_data["price_data"]
+        company_info = ticker_data["company_info"]
+        
         try:
-            data_one = data_one["chart"]["result"][0]
-            data[ticker] = _parse_quotes(data_one)
+            if isinstance(price_data, pd.DataFrame):
+
+                # Create a new DataFrame with the same index
+                data_one = pd.DataFrame(index=price_data.index)
+                # List of columns to copy
+                columns_to_copy = ["Adj Close", "Volume"]
+                # Copy the specified columns from the original DataFrame to the new DataFrame
+                for col in columns_to_copy:
+                    data_one[col] = price_data[col]
+                data[ticker] = data_one
+
+            else:
+                print(f"Can't download historical price data for {ticker}")
 
             if ticker in missing_tickers:
-                currencies[ticker] = data_one['meta']['currency']
-                try:
-                    html = requests.get(url='https://finance.yahoo.com/quote/' + ticker).text
-                    json_str = html.split('root.App.main =')[1].split('(this)')[0].split(';\n}')[0].strip()
-                    info = json.loads(json_str)['context']['dispatcher']['stores']['QuoteSummaryStore']['summaryProfile']
-                    assert (len(info['sector']) > 0) and (len(info['industry']) > 0)
-                    missing_si[ticker] = dict(sector=info["sector"], industry=info["industry"])
-                except:
-                    pass
-        except:
-            pass
+                if market == "india":
+                    currencies[ticker] = "INR"
+                else:
+                    currencies[ticker] = "USD"
+                
+                if isinstance(company_info, pd.DataFrame):
+                    missing_si[ticker] = dict(sector=company_info["sector"].iloc[0], industry=company_info["industry"].iloc[0])
+                else:
+                    print(f"Can't download company information for {ticker}")              
+
+        except Exception as e:
+            print(f"Error: {e}")
         progress.animate()
 
     num_threads = min([len(tickers), multitasking.cpu_count() * 2])
@@ -114,7 +127,7 @@ def download(market: str, tickers: list, start: Union[str, int] = None, end: Uni
 
     data = pd.concat(data.values(), keys=data.keys(), axis=1, sort=True)
     data.drop(columns=data.columns[data.isnull().sum(0) > 0.33 * data.shape[0]], inplace=True)
-    data = data.fillna(method='bfill').fillna(method='ffill').drop_duplicates()
+    data = data.ffill().bfill().drop_duplicates()
 
     info = zip(list(missing_si.keys()), [currencies[ticker] for ticker in missing_si.keys()],
                                         [v['sector'] for v in missing_si.values()],
@@ -146,38 +159,117 @@ def download(market: str, tickers: list, start: Union[str, int] = None, end: Uni
                 sectors={ticker: si[ticker]['SECTOR'] if ticker in si else "NA_" + ticker for ticker in tickers},
                 industries={ticker: si[ticker]['INDUSTRY'] if ticker in si else "NA_" + ticker for ticker in tickers})
 
-def _download_one(market: str, ticker: str, start: str, end: str, interval: str = "1d") -> dict:
+def download_stock_data(market: str, ticker: str, start_date: str, end_date: str, interval: str = "1d") -> dict:
     """
-    Download historical data for a single ticker.
+    Download historical price and ticker info data for a single stock.
 
-    Parameters
-    ----------
-    ticker: str
-        Ticker for which to download historical information.
-    start: int
-        Start download data from this timestamp date.
-    end: int
-        End download data at this timestamp date.
-    interval: str
-        Frequency between data.
+    Parameters:
+    - market (str): Market name ("india" for NSE, otherwise ignored).
+    - ticker (str): Ticker symbol of the stock.
+    - start_date (str): Start date for data download.
+    - end_date (str): End date for data download.
+    - interval (str): Frequency of data (default is "1d" for daily).
 
-    Returns
-    -------
-    data: dict
-        Scraped dictionary of information.
+    Returns:
+    - data (dict): A dictionary containing historical price data and stock information.
     """
+    
+    # If the market is India, append ".NS" to the ticker symbol
     if market == "india":
         ticker = f"{ticker}.NS"
-    base_url = 'https://query1.finance.yahoo.com'
-    params = dict(period1=start, period2=end, interval=interval.lower(), includePrePost=False)
-    url = "{}/v8/finance/chart/{}".format(base_url, ticker)
-    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/111.0.0.0 Safari/537.36'}
-    data = requests.get(url=url, params=params, headers=headers)
-    if "Will be right back" in data.text:
-        raise RuntimeError("*** YAHOO! FINANCE is currently down! ***\n")
-    data = data.json()
-    return data
+    
+    # Create a Ticker object for the specified stock
+    ticker_obj = Ticker(ticker, validate=True)
+    
+    # Download historical price data
+    price_data_raw = ticker_obj.history(
+        interval=interval,
+        start=start_date,
+        end=end_date
+    )
+    
+    # Convert the raw data from yahooquery format to Yahoo Finance format
+    price_data = convert_yahooquery_to_yfinance(price_data_raw)
+    
+    # Get additional stock information using yahooquery
+    company_info = get_stock_info(ticker_obj)
+    
+    # Return a dictionary containing price data and stock information
+    return {
+        "price_data": price_data,
+        "company_info": company_info
+    }
 
+def get_stock_info(tickers):
+    """
+    Get additional stock information using yahooquery.
+
+    Parameters:
+    - tickers: A yahooquery Ticker object.
+
+    Returns:
+    - ticker_info: A DataFrame containing stock information.
+    """
+    try:
+        # Get summaryProfile and quoteType modules from yahooquery
+        datasi = tickers.get_modules("summaryProfile quoteType")
+        
+        # Convert the data to a DataFrame
+        dfsi = pd.DataFrame.from_dict(datasi).T
+        
+        # Normalize the JSON data into a DataFrame for each module
+        dataframes = [
+            pd.json_normalize([x for x in dfsi[module] if isinstance(x, dict)])
+            for module in ['summaryProfile', 'quoteType']
+        ]
+        
+        # Concatenate the dataframes into a single dataframe
+        dfsi = pd.concat(dataframes, axis=1)
+        
+        # Set the index of the dataframe to the 'symbol' column
+        dfsi = dfsi.set_index('symbol')
+        
+        return dfsi
+    except Exception as e:
+        print(f"Error: {e}")
+
+def convert_yahooquery_to_yfinance(df_yahooquery):
+    """
+    Convert a DataFrame from yahooquery format to Yahoo Finance format.
+
+    Parameters:
+    - df_yahooquery: DataFrame in yahooquery format.
+
+    Returns:
+    - df_yahooquery: DataFrame in Yahoo Finance format.
+    """
+    try:
+        # Step 1: Reset the index to make 'Date' a regular column
+        df_yahooquery.reset_index(inplace=True)
+
+        # Step 2: Rename columns to match Yahoo Finance format
+        df_yahooquery.rename(columns={
+            'date': 'Date',
+            'open': 'Open',
+            'high': 'High',
+            'low': 'Low',
+            'close': 'Close',
+            'adjclose': 'Adj Close',
+            'volume': 'Volume'
+        }, inplace=True)
+
+        # Step 3: Convert "Date" to a string in "YYYY-MM-DD" format
+        df_yahooquery['Date'] = pd.to_datetime(df_yahooquery['Date']).dt.strftime('%Y-%m-%d')
+
+        # Step 4: Set "Date" as the index
+        df_yahooquery.set_index('Date', inplace=True)
+
+        # Step 5: Remove the "symbol" column
+        df_yahooquery.drop('symbol', axis=1, inplace=True)
+
+        return df_yahooquery
+    except Exception as e:
+        print(f"Error: {e}")
 
 def _parse_quotes(data: dict, parse_volume: bool = True) -> pd.DataFrame:
     """
