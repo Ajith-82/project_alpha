@@ -8,11 +8,11 @@ import os.path
 import pickle
 import multitasking
 
-from Download import download
-from Tools import convert_currency, extract_hierarchical_info
-from Plotting import *
-from Models import *
-import IndexListFetcher as Index
+from classes.Download import download
+from classes.Tools import convert_currency, extract_hierarchical_info
+from classes.Plotting import *
+from classes.Models import *
+import classes.IndexListFetcher as Index
 
 
 def softplus(x: np.array) -> np.array:
@@ -492,15 +492,3 @@ def volatile(args, data,):
                 os.getcwd(), tab_name
             )
         )
-
-if __name__ == "__main__":
-    args = cli_argparser()
-    cache = args.cache
-    market = args.market
-    if market == "india":
-        symbols = Index.nse_500()
-    else:
-        symbols = Index.sp_500()
-        #symbols = ['NFLX', 'GOOG', 'AAPL', 'META', 'AMZN']
-    data = load_data(cache, symbols, market)
-    volatile(args, data)

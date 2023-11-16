@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 import os.path
+import requests
 import pandas as pd
 import multitasking
 import csv
@@ -8,7 +9,7 @@ import datetime as dt
 from yahooquery import Ticker
 from typing import Union
 
-from Tools import ProgressBar
+from classes.Tools import ProgressBar
 
 def download(market: str, tickers: list, start: Union[str, int] = None, end: Union[str, int] = None, interval: str = "1d") -> dict:
     """
@@ -38,6 +39,7 @@ def download(market: str, tickers: list, start: Union[str, int] = None, end: Uni
     tickers = tickers if isinstance(tickers, (list, set, tuple)) else tickers.replace(',', ' ').split()
     tickers = list(set([ticker.upper() for ticker in tickers]))
 
+    price_data = {}
     data = {}
     si_columns = ["SYMBOL", "CURRENCY", "SECTOR", "INDUSTRY"]
     si_filename = "stock_info.csv"
@@ -49,16 +51,17 @@ def download(market: str, tickers: list, start: Union[str, int] = None, end: Uni
     # load stock information file
     si = pd.read_csv(si_filename)
     missing_tickers = [ticker for ticker in tickers if ticker not in si['SYMBOL'].values]
-    missing_si, na_si = {}, {}
+    missing_si = {}
     currencies = {}
 
     if end is None:
         end = dt.datetime.today().strftime('%Y-%m-%d')
-    elif type(end) is str:
+    elif type(end) == str:
         end = dt.datetime.strptime(end, '%Y-%m-%d')
+
     if start is None:
-        start = (dt.datetime.now() - dt.timedelta(365)).strftime('%Y-%m-%d')
-    elif type(start) is str:
+        start = (dt.datetime.now() - dt.timedelta(1000)).strftime('%Y-%m-%d')
+    elif type(start) == str:
         start = dt.datetime.strptime(start, '%Y-%m-%d')
 
     @multitasking.task
@@ -78,23 +81,20 @@ def download(market: str, tickers: list, start: Union[str, int] = None, end: Uni
             End download data at this date.
         """
         ticker_data = download_stock_data(market, ticker, start, end, interval)
-        price_data = ticker_data["price_data"]
+        price_data_one = ticker_data["price_data"]
         company_info = ticker_data["company_info"]
         
         try:
-            if isinstance(price_data, pd.DataFrame):
-
+            if isinstance(price_data_one, pd.DataFrame):
+                price_data[ticker] =  price_data_one
                 # Create a new DataFrame with the same index
-                data_one = pd.DataFrame(index=price_data.index)
+                data_one = pd.DataFrame(index=price_data_one.index)
                 # List of columns to copy
                 columns_to_copy = ["Adj Close", "Volume"]
                 # Copy the specified columns from the original DataFrame to the new DataFrame
                 for col in columns_to_copy:
-                    data_one[col] = price_data[col]
+                    data_one[col] = price_data_one[col]
                 data[ticker] = data_one
-
-            else:
-                print(f"Can't download historical price data for {ticker}")
 
             if ticker in missing_tickers:
                 if market == "india":
@@ -104,8 +104,6 @@ def download(market: str, tickers: list, start: Union[str, int] = None, end: Uni
                 
                 if isinstance(company_info, pd.DataFrame):
                     missing_si[ticker] = dict(sector=company_info["sector"].iloc[0], industry=company_info["industry"].iloc[0])
-                else:
-                    print(f"Can't download company information for {ticker}")              
 
         except Exception as e:
             print(f"Error: {e}")
@@ -157,7 +155,8 @@ def download(market: str, tickers: list, start: Union[str, int] = None, end: Uni
                 exchange_rates=xrates,
                 default_currency=default_currency,
                 sectors={ticker: si[ticker]['SECTOR'] if ticker in si else "NA_" + ticker for ticker in tickers},
-                industries={ticker: si[ticker]['INDUSTRY'] if ticker in si else "NA_" + ticker for ticker in tickers})
+                industries={ticker: si[ticker]['INDUSTRY'] if ticker in si else "NA_" + ticker for ticker in tickers},
+                price_data = price_data)
 
 def download_stock_data(market: str, ticker: str, start_date: str, end_date: str, interval: str = "1d") -> dict:
     """
@@ -231,7 +230,8 @@ def get_stock_info(tickers):
         
         return dfsi
     except Exception as e:
-        print(f"Error: {e}")
+        #print(f"Error: {e}")
+        pass
 
 def convert_yahooquery_to_yfinance(df_yahooquery):
     """
@@ -269,7 +269,8 @@ def convert_yahooquery_to_yfinance(df_yahooquery):
 
         return df_yahooquery
     except Exception as e:
-        print(f"Error: {e}")
+        #print(f"Error: {e}")
+        pass
 
 def _parse_quotes(data: dict, parse_volume: bool = True) -> pd.DataFrame:
     """
@@ -337,11 +338,11 @@ def get_exchange_rates(from_currencies: list, to_currency: str, dates: pd.Index,
     """
     if end is None:
         end = int(dt.datetime.timestamp(dt.datetime.today()))
-    elif type(end) is str:
+    elif type(end) == str:
         end = int(dt.datetime.timestamp(dt.datetime.strptime(end, '%Y-%m-%d')))
     if start is None:
         start = int(dt.datetime.timestamp(dt.datetime.today() - dt.timedelta(365)))
-    elif type(start) is str:
+    elif type(start) == str:
         start = int(dt.datetime.timestamp(dt.datetime.strptime(start, '%Y-%m-%d')))
 
     ucurrencies, counts = np.unique(from_currencies, return_counts=True)
@@ -354,8 +355,38 @@ def get_exchange_rates(from_currencies: list, to_currency: str, dates: pd.Index,
         tmp = pd.concat(tmp.values(), keys=tmp.keys(), axis=1, sort=True)
         xrates = pd.DataFrame(index=dates, columns=tmp.columns)
         xrates.loc[xrates.index.isin(tmp.index)] = tmp
-        xrates = xrates.fillna(method='bfill').fillna(method='ffill')
+        xrates = xrates.ffill().bfill()
         xrates.to_dict(orient='list')
     else:
         xrates = tmp
     return xrates
+
+def _download_one(ticker: str, start: int, end: int, interval: str = "1d") -> dict:
+    """
+    Download historical data for a single ticker.
+
+    Parameters
+    ----------
+    ticker: str
+        Ticker for which to download historical information.
+    start: int
+        Start download data from this timestamp date.
+    end: int
+        End download data at this timestamp date.
+    interval: str
+        Frequency between data.
+
+    Returns
+    -------
+    data: dict
+        Scraped dictionary of information.
+    """
+    base_url = 'https://query1.finance.yahoo.com'
+    params = dict(period1=start, period2=end, interval=interval.lower(), includePrePost=False)
+    url = "{}/v8/finance/chart/{}".format(base_url, ticker)
+    headers = {'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_11_5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/50.0.2661.102 Safari/537.36'}
+    data = requests.get(url=url, params=params, headers=headers)
+    if "Will be right back" in data.text:
+        raise RuntimeError("*** YAHOO! FINANCE is currently down! ***\n")
+    data = data.json()
+    return data

@@ -1,8 +1,17 @@
 import os
 import datetime
 import numpy as np
+import pandas as pd
+import pandas_ta as ta
 import matplotlib
 import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
+import matplotlib.gridspec as gridspec
+# For plotting
+import plotly.graph_objects as go
+import plotly.express as px
+from plotly.subplots import make_subplots
+import plotly.io as pio
 
 
 def compute_uncertainty_bounds(est: np.array, std: np.array):
@@ -383,3 +392,147 @@ def plot_chosen_stocks_exploration(data, est, std, idx_choice_all, num_cols=3):
     fig_name = 'plots/exploration_chosen_stocks.png'
     print('Plot of the stocks chosen during the exploration has been saved to {}/{}.'.format(os.getcwd(), fig_name))
     fig.savefig(fig_name, dpi=fig.dpi)
+
+# Sets padding for figures
+def set_padding(fig):
+    fig.update_layout(margin=go.layout.Margin(
+        r=10, #right margin
+        b=10)) #bottom margin
+
+# Adds the range selector to given figure
+def add_range_selector(fig):
+    fig.update_layout(
+        xaxis=dict(
+            rangeselector=dict(
+                buttons=[
+                    dict(count=1, label='1m', step='month', stepmode='backward'),
+                    dict(count=6, label='6m', step='month', stepmode='backward'),
+                    dict(count=1, label='YTD', step='year', stepmode='todate'),
+                    dict(count=1, label='1y', step='year', stepmode='backward'),
+                    dict(step='all')
+                ]),
+            type='date'),#end xaxis  definition
+        xaxis2_type='date')
+
+# Adds the volume chart to row 2, column 1
+def add_volume_chart(fig, df):
+    # Colours for the Bar chart
+    colors = ['#9C1F0B' if row['Open'] - row['Close'] >= 0
+          else '#2B8308' for index, row in df.iterrows()]
+
+    # Adds the volume as a bar chart
+    fig.add_trace(go.Bar(x=df.index, y=df['Volume'], showlegend=False, marker_color=colors), row=2, col=1)
+
+def plot_strategy_one(ticker, df, max_bars=200):
+    """
+    Plot RSI, Price and SMAs, and MACD for a given stock.
+
+    Parameters:
+    - ticker: str, the stock ticker symbol
+    - df: pd.DataFrame, stock data
+    - max_bars: int, maximum number of bars to display on the x-axis
+    """
+
+    # Calculate RSI
+    delta = df['Close'].diff(1)
+    gain = delta.where(delta > 0, 0)
+    loss = -delta.where(delta < 0, 0)
+    avg_gain = gain.rolling(window=14).mean()
+    avg_loss = loss.rolling(window=14).mean()
+    rs = avg_gain / avg_loss
+    df['RSI'] = 100 - (100 / (1 + rs))
+    df = df.tail(200)
+
+    # Plotting
+    fig = plt.figure(figsize=(10, 10))
+    gs = gridspec.GridSpec(3, 1, height_ratios=[1, 3, 1])
+
+    # Add subplots using the gridspec layout
+    axes = [plt.subplot(gs[0]), plt.subplot(gs[1]), plt.subplot(gs[2])]
+
+    # Plotting RSI
+    axes[0].plot(df['RSI'], label='RSI', color='purple')
+    axes[0].axhline(70, linestyle='--', color='red', alpha=0.5)  # Overbought threshold
+    axes[0].axhline(30, linestyle='--', color='green', alpha=0.5)  # Oversold threshold
+    axes[0].axhline(50, linestyle='--', color='black', alpha=0.5)
+    axes[0].legend()
+
+    # Plotting Price and SMAs
+    axes[1].plot(df['Close'], label='Close Price', color='black')
+    axes[1].plot(df['SMA_10'], label='SMA 10', color='green')
+    axes[1].plot(df['SMA_30'], label='SMA 30', color='yellow')
+    axes[1].plot(df['SMA_50'], label='SMA 50', color='orange')
+    axes[1].plot(df['SMA_200'], label='SMA 200', color='blue')
+    axes[1].legend()
+
+    # Plotting MACD
+    axes[2].bar(df.index, df['MACD_hist'], label='MACD Histogram', color='gray')
+    axes[2].plot(df['MACD'], label='MACD', color='blue')
+    axes[2].plot(df['MACD_signal'], label='Signal Line', color='orange')
+    axes[2].axhline(0, linestyle='--', color='gray', alpha=0.5)
+    axes[2].legend()
+
+    # Disable x-axis labels for subplots [0] and [1]
+    axes[0].set_xticks([])
+    axes[1].set_xticks([])
+
+    # Set individual titles for each subplot
+    axes[0].set_title(f'{ticker} Report')
+
+    # Customize x-axis date labels
+    axes[2].xaxis.set_major_locator(plt.MaxNLocator(max_bars // 10))
+    axes[2].xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d'))
+    plt.xticks(rotation=45)
+
+    # Adjust space between subplots
+    plt.subplots_adjust(hspace=0)
+
+    plt.xlabel('Date')
+    plt.tight_layout(pad=0)
+
+    # Save the figure
+    save_dir = 'plots'
+    os.makedirs(save_dir, exist_ok=True)
+    plt.savefig(f'{save_dir}/{ticker}.png', dpi=fig.dpi)
+
+def plot_strategy_multiple(tickers, data, max_bars=200):
+    for i, ticker in enumerate(tickers):
+        df = data[ticker]
+        # removing all empty dates
+        # build complete timeline from start date to end date
+        dt_all = pd.date_range(start=df.index[0],end=df.index[-1])
+        # retrieve the dates that are in the original datset
+        dt_obs = [d.strftime("%Y-%m-%d") for d in pd.to_datetime(df.index)]
+        # define dates with missing values
+        dt_breaks = [d for d in dt_all.strftime("%Y-%m-%d").tolist() if not d in dt_obs]
+        df = df.tail(max_bars)
+        # Construct a 2 x 1 Plotly figure
+        fig = make_subplots(rows=2, cols=1, vertical_spacing=0.01, shared_xaxes=True)
+
+        # Plot the Price, SMA and EMA chart
+        for col in ['Close', 'SMA_10', 'SMA_30', 'SMA_50', 'SMA_200']:
+            fig.add_trace(go.Scatter(x=df.index, y=df[col], name=col), row=1, col=1)
+
+        # Add the volume chart
+        add_volume_chart(fig, df)
+
+        # Adds the range selector
+        add_range_selector(fig)
+
+        # Set the color from white to black on range selector buttons
+        #fig.update_layout(xaxis=dict(rangeselector = dict(font = dict( color = 'black'))))
+
+        # Add labels to y axes
+        fig.update_yaxes(title_text="Price", row=1, col=1)
+        fig.update_yaxes(title_text="Volume", row=2, col=1)
+
+        # Sets customized padding
+        set_padding(fig)
+
+        # Remove dates without values
+        fig.update_xaxes(rangebreaks=[dict(values=dt_breaks)])
+
+        # Set the template and the title
+        layout = go.Layout(template="seaborn", title = ticker + ' - Price and Volume', height=500, legend_title='Legend')
+        fig.update_layout(layout)
+        pio.write_image(fig, f"plots/{ticker}.png")

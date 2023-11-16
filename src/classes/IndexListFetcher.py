@@ -237,6 +237,13 @@ def nse_500():
     df = pd.read_csv(url)
     return df["Symbol"].to_list()
 
+def nse_50():
+    ''''''
+
+def nse_100():
+    ''''''
+
+    
 def main():
     # screener_value()
     #print(us_sector_dict())
