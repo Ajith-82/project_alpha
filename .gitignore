@@ -16,3 +16,4 @@ plots/
 *.pdf
 *.png
 logs/
+data/

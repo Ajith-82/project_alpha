@@ -1,6 +1,8 @@
 #!/usr/bin/env python
+import sys
 import datetime as dt
 from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter, SUPPRESS
+from json import tool
 import os.path
 import pickle
 
@@ -8,6 +10,7 @@ from classes.Download import download
 from classes.Volatile import volatile
 from classes.Screener_one import screener_one
 import classes.IndexListFetcher as Index
+import classes.Tools as tools
 
 
 def cli_argparser():
@@ -53,18 +56,28 @@ def cli_argparser():
     )
     return cli.parse_args()
 
-def load_data(cache, symbols: list, market: str):
-    if cache and os.path.exists("data.pickle"):
+def load_data(cache, symbols=None, market="", file_prefix="", data_dir=""):
+    while cache:
         print("\nLoading historical data...")
-        with open("data.pickle", "rb") as handle:
-            data = pickle.load(handle)
-        print("Data has been saved to {}/{}.".format(os.getcwd(), "data.pickle"))
-    else:
-        if symbols is None:
-            with open("symbols_list.txt", "r") as my_file:
-                symbols = my_file.readlines()[0].split(" ")
-        print("\nDownloading historical data...")
-        data = download(market, symbols)
+        data = tools.load_cache(file_prefix, data_dir)
+        if bool(data):
+            return data
+        else:
+            cache = ""
+
+    if symbols is None:
+        symbols_file_path = "symbols_list.txt"
+        if os.path.exists(symbols_file_path):
+            with open(symbols_file_path, "r") as my_file:
+                symbols = my_file.readline().split(" ")
+        else:
+            print(f"No symbols information to download data. Exit script.")
+            sys.exit()
+
+    print("\nDownloading historical data...")
+    data = download(market, symbols)
+    tools.save_dict_with_timestamp(data, file_prefix, data_dir)
+
     return data
 
 def save_data(data):
@@ -76,16 +89,18 @@ def main():
     cache = args.cache
     market = args.market
     if market == "india":
-        symbols = Index.nse_500()
+        index, symbols = Index.nse_500()
         #symbols = ['EICHERMOT','HEROMOTOCO','NESTLEIND','ONGC', 'COALINDIA','RELIANCE','BPCL','LTIM','MARUTI','HCLTECH',]
     else:
-        symbols = Index.sp_500()
-        symbols = ['meta', 'aapl', 'amzn', 'nflx', 'goog']
-    data = load_data(cache, symbols, market)
-    if not cache:
-        save_data(data)
+        index, symbols = Index.dow_jones()
+        #symbols = ['meta', 'aapl', 'amzn', 'nflx', 'goog']
+    data_dir = f"data/historic_data/{market}"
+    file_prifix = f"{index}_data"
+    data = load_data(cache, symbols, market, file_prifix, data_dir)
+
+    # Start processing data
     #volatile(args, data)
-    screener_one(data, 50)
+    screener_one(data, 3)
 
 if __name__ == "__main__":
     main()

@@ -1,5 +1,8 @@
 #!/usr/bin/env python
 import sys
+import os
+import datetime
+import pickle
 import numpy as np
 
 def convert_currency(logp: np.array, xrate: np.array, type: str = "forward") -> np.array:
@@ -25,6 +28,94 @@ def convert_currency(logp: np.array, xrate: np.array, type: str = "forward") -> 
     if type == "backward":
         return logp - np.log(xrate)
     raise Exception("Conversion type {} not recognised.".format(type))
+
+def cleanup_directory(directory_path):
+    """
+    Cleans up a directory by deleting all files.
+
+    Parameters:
+    - directory_path: str, the path to the directory to be cleaned up.
+    """
+    try:
+        # List all files in the directory
+        files = os.listdir(directory_path)
+
+        # Iterate through files and delete them
+        for file in files:
+            file_path = os.path.join(directory_path, file)
+            if os.path.isfile(file_path):
+                os.remove(file_path)
+
+        print(f"Directory '{directory_path}' cleaned up successfully.")
+
+    except Exception as e:
+        print(f"Error cleaning up directory '{directory_path}': {e}")
+
+def save_dict_with_timestamp(data_dict, file_prefix, dest_directory='.'):
+    """
+    Save a dictionary to a file with a "_YYMMDD.pkl" prefix and remove any existing older files.
+
+    Parameters:
+    - data_dict: dict, the dictionary to be saved.
+    - file_prefix: str, the prefix for the file (without extension).
+    - dest_directory: str, the destination directory for saving the file (default is the current directory).
+    """
+    try:
+        # Generate timestamp in YYMMDD format
+        timestamp = datetime.datetime.now().strftime('%y%m%d')
+
+        # Check if a directory exists, and create it if it doesn't.
+        if not os.path.exists(dest_directory):
+            os.makedirs(dest_directory)
+            print(f"Directory '{dest_directory}' created.")
+
+        # Create a new file name with the timestamp
+        new_file_path = os.path.join(dest_directory, f"{file_prefix}_{timestamp}.pkl")
+
+        # Remove older files with the same prefix
+        for existing_file in os.listdir(dest_directory):
+            if existing_file.startswith(f"{file_prefix}_") and existing_file.endswith('.pkl'):
+                os.remove(os.path.join(dest_directory, existing_file))
+                print(f"Removed older file: {existing_file}")
+
+        # Save the dictionary to the new file
+        with open(new_file_path, 'wb') as file:
+            pickle.dump(data_dict, file)
+
+        print(f"Dictionary saved to '{new_file_path}'.")
+
+    except Exception as e:
+        print(f"Error saving dictionary on {timestamp}: {e}")
+
+def load_cache(file_prefix, source_dir='.'):
+    """
+    Load a dictionary from a file.
+
+    Parameters:
+    - file_prefix: str, the prefix for the file (without extension).
+    - source_dir: str, the source directory for the file (default is the current directory).
+
+    Returns:
+    - dict or None: The loaded dictionary or None if the file doesn't exist.
+    """
+    # Generate timestamp in YYMMDD format
+    timestamp = datetime.datetime.now().strftime('%y%m%d')
+
+    # Create a new file name with the timestamp
+    file_path = os.path.join(source_dir, f"{file_prefix}_{timestamp}.pkl")
+    
+    if os.path.exists(file_path):
+        try:
+            with open(file_path, 'rb') as file:
+                loaded_dict = pickle.load(file)
+                print(f"Using data saved to {file.name}.")
+                return loaded_dict
+        except Exception as e:
+            print(f"Error loading dictionary: {e}")
+            return {}
+    else:
+        print(f"File not found: {file_path}")
+        return {}
 
 class ProgressBar:
     """

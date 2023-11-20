@@ -205,16 +205,19 @@ def us_sector_dict():
     return sector_stocks
 
 def sp_500():
+    index = "sp_500"
     url = "https://www.stockmonitor.com/sp500-stocks/"
-    return get_sector_stocks_list(url)
+    return index, get_sector_stocks_list(url)
 
 def tech_100():
+    index = "tech_100"
     url = "https://www.stockmonitor.com/nasdaq-stocks/"
-    return get_sector_stocks_list(url)
+    return index, get_sector_stocks_list(url)
 
 def dow_jones():
+    index = "dow_jones"
     url = "https://www.stockmonitor.com/dji-stocks/"
-    return get_sector_stocks_list(url)
+    return index, get_sector_stocks_list(url)
 
 def sector_list(sector_name):
     # Data source URLs.
@@ -233,9 +236,10 @@ def sector_list(sector_name):
     return sector_stocks
 
 def nse_500():
+    index = "nse_500"
     url = "https://archives.nseindia.com/content/indices/ind_nifty500list.csv"
     df = pd.read_csv(url)
-    return df["Symbol"].to_list()
+    return index, df["Symbol"].to_list()
 
 def nse_50():
     ''''''
