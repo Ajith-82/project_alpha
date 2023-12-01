@@ -1,11 +1,14 @@
-import yfinance as yf
+# import yfinance as yf
 import requests
 import datetime as dt
 import pandas as pd
 import numpy as np
+from src.classes.Send_email import EmailServer
 
 
-def _download_one(market: str, ticker: str, start: str, end: str, interval: str = "1d") -> dict:
+def _download_one(
+    market: str, ticker: str, start: str, end: str, interval: str = "1d"
+) -> dict:
     """
     Download historical data for a single ticker.
 
@@ -27,15 +30,20 @@ def _download_one(market: str, ticker: str, start: str, end: str, interval: str 
     """
     if market == "india":
         ticker = f"{ticker}.NS"
-    base_url = 'https://query1.finance.yahoo.com'
-    params = dict(period1=start, period2=end, interval=interval.lower(), includePrePost=False)
+    base_url = "https://query1.finance.yahoo.com"
+    params = dict(
+        period1=start, period2=end, interval=interval.lower(), includePrePost=False
+    )
     url = "{}/v8/finance/chart/{}".format(base_url, ticker)
-    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/111.0.0.0 Safari/537.36'}
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/111.0.0.0 Safari/537.36"
+    }
     data = requests.get(url=url, params=params, headers=headers)
     if "Will be right back" in data.text:
         raise RuntimeError("*** YAHOO! FINANCE is currently down! ***\n")
     data = data.json()
     return data
+
 
 def _parse_quotes(data: dict, parse_volume: bool = True) -> pd.DataFrame:
     """
@@ -71,15 +79,16 @@ def _parse_quotes(data: dict, parse_volume: bool = True) -> pd.DataFrame:
     quotes = pd.DataFrame(quotes)
     quotes.index = pd.to_datetime(timestamps, unit="s").date
     quotes.sort_index(inplace=True)
-    quotes = quotes.loc[~quotes.index.duplicated(keep='first')]
+    quotes = quotes.loc[~quotes.index.duplicated(keep="first")]
 
     return quotes
 
-def main():
+
+def main_old():
     msft = yf.Ticker("MSFT")
-    #quotes = yf.download("AAPL", period="1y")
-    prices = msft.history(timeout= 10)
-    #print(quotes)
+    # quotes = yf.download("AAPL", period="1y")
+    prices = msft.history(timeout=10)
+    # print(quotes)
     print(prices)
 
     data = {}
@@ -88,11 +97,21 @@ def main():
     end = int(dt.datetime.timestamp(dt.datetime.today()))
     start = int(dt.datetime.timestamp(dt.datetime.today() - dt.timedelta(365)))
     data_one = _download_one(market, ticker, start, end)
-    
+
     data_one = data_one["chart"]["result"][0]
     print(data_one)
     data[ticker] = _parse_quotes(data_one)
     print(data[ticker])
+
+
+def main():
+    email_server = EmailServer("email_config.json")
+    email_server.send_svg_attachment(
+        "Test Subject",
+        "Test Message",
+        svg_folder="data/processed_data/plot_indicators",
+        mock=False,
+    )
 
 
 if __name__ == "__main__":

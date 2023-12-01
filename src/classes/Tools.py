@@ -2,6 +2,7 @@
 import sys
 import os
 import datetime
+import json
 import pickle
 import numpy as np
 
@@ -76,13 +77,13 @@ def save_dict_with_timestamp(data_dict, file_prefix, dest_directory='.'):
         for existing_file in os.listdir(dest_directory):
             if existing_file.startswith(f"{file_prefix}_") and existing_file.endswith('.pkl'):
                 os.remove(os.path.join(dest_directory, existing_file))
-                print(f"Removed older file: {existing_file}")
+                print(f"Removed older data file: {existing_file}")
 
         # Save the dictionary to the new file
         with open(new_file_path, 'wb') as file:
             pickle.dump(data_dict, file)
 
-        print(f"Dictionary saved to '{new_file_path}'.")
+        print(f"Data dictionary saved to '{new_file_path}'.")
 
     except Exception as e:
         print(f"Error saving dictionary on {timestamp}: {e}")
@@ -246,3 +247,45 @@ def compute_risk(portfolio: dict, variances: dict, sectors: dict, industries: di
                     tmp += variances[t1]['sector']
             risk += portfolio[t1]['units'] * portfolio[t2]['units'] * tmp
     return np.sqrt(risk) / max(len(portfolio), 1)
+
+def read_credentials_from_json(file_path):
+    """
+    Reads credentials from a JSON file.
+
+    Parameters:
+    - file_path: str, the path to the JSON file containing credentials.
+
+    Returns:
+    - credentials: dict, a dictionary containing the read credentials.
+    """
+    try:
+        with open(file_path, 'r') as json_file:
+            credentials = json.load(json_file)
+        return credentials
+    except FileNotFoundError:
+        print(f"File not found: {file_path}")
+        return None
+    except json.JSONDecodeError:
+        print(f"Error decoding JSON in file: {file_path}")
+        return None
+    
+def cleanup_directory_files(directory_path):
+    """
+    Cleans up a directory by deleting all files while keeping the directory structure.
+
+    Parameters:
+    - directory_path: str, the path to the directory to be cleaned up.
+    """
+    try:
+        # Iterate through files in the directory
+        for root, dirs, files in os.walk(directory_path):
+            for file in files:
+                file_path = os.path.join(root, file)
+                os.remove(file_path)
+
+        print(f"Files in directory '{directory_path}' cleaned up successfully.")
+
+    except Exception as e:
+        print(f"Error cleaning up files in directory '{directory_path}': {e}")
+
+

@@ -1,12 +1,7 @@
-from matplotlib import ticker
 import pandas as pd
 import pandas_ta as ta
 import numpy as np
-from datetime import datetime as dt
-from datetime import timedelta as delta
 import numpy as np
-import seaborn as sb
-import os
 from classes.Plot_indicators import plot_strategy_multiple
 
 
@@ -146,7 +141,7 @@ def stock_meets_conditions(ticker, data, signals, lookback_days):
     return matching_trades
 
 
-def screener_one(data, look_back_days=5):
+def screener_ma(data, out_dir, look_back_days=5):
     tickers = data["tickers"]
     price_data = data["price_data"]
     signals = pd.DataFrame(
@@ -176,4 +171,4 @@ def screener_one(data, look_back_days=5):
             plot_tickers.append(ticker)
             plot_data[ticker] = _df
 
-    plot_strategy_multiple(plot_tickers, plot_data)
+    plot_strategy_multiple(plot_tickers, plot_data, out_dir)

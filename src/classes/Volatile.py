@@ -467,7 +467,7 @@ def volatile(args, data,):
             print(separator)
 
     if args.save_table:
-        tab_name = "prediction_table.csv"
+        tab_name = "data/processed_data/plot_volatile/prediction_table.csv"
         table = zip(
             ["SYMBOL"] + ranked_tickers.tolist(),
             ["SECTOR"] + ranked_sectors,
@@ -488,7 +488,7 @@ def volatile(args, data,):
             for row in table:
                 wr.writerow(row)
         print(
-            "\nThe prediction table printed above has been saved to {}/{}.".format(
-                os.getcwd(), tab_name
+            "\nThe prediction table printed above has been saved to {}.".format(
+                tab_name
             )
         )

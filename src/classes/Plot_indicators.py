@@ -116,7 +116,7 @@ def add_rsi_chart(fig, df):
     fig.update_yaxes(range=[0, 100], row=4, col=1)
 
 
-def plot_strategy_multiple(tickers, data, max_bars=200):
+def plot_strategy_multiple(tickers, data, out_dir, max_bars=200):
     for i, ticker in enumerate(tickers):
         df = data[ticker]
         # removing all empty dates
@@ -133,7 +133,7 @@ def plot_strategy_multiple(tickers, data, max_bars=200):
             cols=1,
             vertical_spacing=0.01,
             shared_xaxes=True,
-            row_heights=(2, 1, 1, 1),
+            row_heights=(2, 0.5, 1, 1),
         )
 
         # Plot the Price, SMA and EMA chart
@@ -177,5 +177,5 @@ def plot_strategy_multiple(tickers, data, max_bars=200):
         )
         fig.update_layout(layout)
         pio.write_image(
-            fig, f"data/processed_data/plot_indicators/{ticker}.svg", format="svg"
+            fig, f"{out_dir}/{ticker}.svg", format="svg"
         )

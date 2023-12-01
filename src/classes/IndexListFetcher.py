@@ -85,6 +85,7 @@ def get_ticker(company_name):
     except IndexError:
         pass
 
+
 def _create_file_schema(df, filename):
     fields = []
     for name, dtype in zip(df.columns, df.dtypes):
@@ -105,6 +106,7 @@ def _create_file_schema(df, filename):
     }
 
 
+"""
 def _create_datapackage(datasets):
     resources = []
     for df, filename in datasets:
@@ -116,21 +118,9 @@ def _create_datapackage(datasets):
         "license": "",
         "resources": resources,
     }
+"""
 
 
-def nasdaq_symbols_list():
-    symbols_file = (
-        "ftp://ftp.nasdaqtrader.com/symboldirectory/nasdaqlisted.txt"  # Nasdaq only
-    )
-    symbols_raw = pd.read_csv(symbols_file, sep="|")
-    symbols_raw = _clean_data(symbols_raw)
-    symbols_filtered = symbols_raw[
-        (symbols_raw["Market Category"] == "S")
-        & (symbols_raw["Financial Status"] == "N")
-        & (symbols_raw["Test Issue"] == "N")
-    ]
-    symbols_list = symbols_filtered["Symbol"].tolist()
-    return symbols_list
 
 
 def nyse_symbols_list():
@@ -141,17 +131,20 @@ def nyse_symbols_list():
     symbols_filtered = symbols_raw[
         (symbols_raw["Exchange"] == "N") & (symbols_raw["ETF"] == "N")
     ]
-    symbols_list = symbols_filtered["Symbol"].tolist()
+    symbols_list = symbols_filtered["Symbol"].unique().tolist()
     return symbols_list
 
-def screener_value():
+
+def ind_screener_value_stocks():
     link1 = "https://www.screener.in/screens/184/value-stocks/?sort=price+to+earning&order=desc&limit=50&page=1"
     link2 = "https://www.screener.in/screens/184/value-stocks/?sort=price+to+earning&order=desc&limit=50&page=2"
     symbols_raw = pd.read_html(link1) + pd.read_html(link2)
     symbols_raw = pd.concat(symbols_raw, ignore_index=True)
     symbols_raw = _screener_clean_data(symbols_raw)
     symbols_list = symbols_raw["Symbol"].tolist()
-    return symbols_list
+    index = "ind_screener_value"
+    return index, symbols_list
+
 
 def sp_500_old():
     link = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies#S&P_500_component_stocks"
@@ -159,17 +152,18 @@ def sp_500_old():
     symbols_list = symbols_raw["Symbol"].tolist()
     return symbols_list
 
+
 # Data source www.stockmonitor.com
 def get_sector_stocks_list(url):
-    '''
+    """
     Function to fetch stock sector or stock list from a URL.
-    
+
     Args:
         url (str): The URL to fetch data from.
-    
+
     Returns:
         list: A list of stock sectors or lists.
-    '''
+    """
     try:
         headers = {
             "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36"
@@ -177,12 +171,18 @@ def get_sector_stocks_list(url):
         response = requests.get(url, headers=headers)
         response.raise_for_status()  # Raise an exception for bad status codes
 
-        soup = BeautifulSoup(response.text, 'html.parser')
+        soup = BeautifulSoup(response.text, "html.parser")
         elements = [element.text for element in soup.select("tbody tr td.text-left a")]
-        return elements
+        unique_elements = []
+        for item in elements:
+            if item not in unique_elements:
+                unique_elements.append(item)
+        return unique_elements
+
     except Exception as e:
         print(f"An error occurred: {str(e)}")
         return []
+
 
 def us_sector_dict():
     # Data source URLs.
@@ -204,21 +204,6 @@ def us_sector_dict():
 
     return sector_stocks
 
-def sp_500():
-    index = "sp_500"
-    url = "https://www.stockmonitor.com/sp500-stocks/"
-    return index, get_sector_stocks_list(url)
-
-def tech_100():
-    index = "tech_100"
-    url = "https://www.stockmonitor.com/nasdaq-stocks/"
-    return index, get_sector_stocks_list(url)
-
-def dow_jones():
-    index = "dow_jones"
-    url = "https://www.stockmonitor.com/dji-stocks/"
-    return index, get_sector_stocks_list(url)
-
 def sector_list(sector_name):
     # Data source URLs.
     base_url = "https://www.stockmonitor.com/sector/"
@@ -235,24 +220,81 @@ def sector_list(sector_name):
 
     return sector_stocks
 
+def sp_500():
+    index = "sp_500"
+    url = "https://www.stockmonitor.com/sp500-stocks/"
+    return index, get_sector_stocks_list(url)
+
+
+def tech_100():
+    index = "tech_100"
+    url = "https://www.stockmonitor.com/nasdaq-stocks/"
+    return index, get_sector_stocks_list(url)
+
+
+def dow_jones():
+    index = "dow_jones"
+    url = "https://www.stockmonitor.com/dji-stocks/"
+    return index, get_sector_stocks_list(url)
+
+
+def nasdaq_all():
+    index = "nasdaq_all"
+    symbols_file = (
+        "ftp://ftp.nasdaqtrader.com/symboldirectory/nasdaqlisted.txt"  # Nasdaq only
+    )
+    symbols_raw = pd.read_csv(symbols_file, sep="|")
+    symbols_raw = _clean_data(symbols_raw)
+    symbols_filtered = symbols_raw[
+        (symbols_raw["Market Category"] == "S")
+        & (symbols_raw["Financial Status"] == "N")
+        & (symbols_raw["Test Issue"] == "N")
+    ]
+    symbols_list = symbols_filtered["Symbol"].tolist()
+    return index, symbols_list
+
 def nse_500():
     index = "nse_500"
     url = "https://archives.nseindia.com/content/indices/ind_nifty500list.csv"
     df = pd.read_csv(url)
     return index, df["Symbol"].to_list()
 
+
 def nse_50():
-    ''''''
+    index = "nse_50"
+    url = "https://archives.nseindia.com/content/indices/ind_nifty50list.csv"
+    df = pd.read_csv(url)
+    return index, df["Symbol"].to_list()
 
 def nse_100():
-    ''''''
+    index = "nse_100"
+    url = "https://archives.nseindia.com/content/indices/ind_nifty100list.csv"
+    df = pd.read_csv(url)
+    return index, df["Symbol"].to_list()
 
-    
+def nse_small_cap_250():
+    index = "nse_small_cap_250"
+    url = "https://archives.nseindia.com/content/indices/ind_niftysmallcap250list.csv"
+    df = pd.read_csv(url)
+    return index, df["Symbol"].to_list()
+
+def nse_mid_cap_150():
+    index = "nse_mid_cap_150"
+    url = "https://archives.nseindia.com/content/indices/ind_niftymidcap150list.csv"
+    df = pd.read_csv(url)
+    return index, df["Symbol"].to_list()
+
+def nse_all():
+    index = "nse_all"
+    url = "https://archives.nseindia.com/content/equities/EQUITY_L.csv"
+    df = pd.read_csv(url)
+    return index, df["SYMBOL"].to_list()
+
 def main():
     # screener_value()
-    #print(us_sector_dict())
-    print(nse_500())
+    print(ind_screener_value_stocks())
+    print(len(ind_screener_value_stocks()[1]))
+
 
 if __name__ == "__main__":
     main()
-    

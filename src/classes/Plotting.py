@@ -43,9 +43,9 @@ def plot_market_estimates(data: dict, est: np.array, std: np.array):
     labels = [l.get_label() for l in ll]
     plt.legend(ll, labels, loc="upper left")
 
-    if not os.path.exists('data/processed_data/plot_indicators'):
-        os.mkdir('data/processed_data/plot_indicators')
-    fig_name = 'data/processed_data/plot_indicators/market_estimation.png'
+    if not os.path.exists('data/processed_data/plot_volatile'):
+        os.mkdir('data/processed_data/plot_volatile')
+    fig_name = 'data/processed_data/plot_volatile/market_estimation.png'
     fig.savefig(fig_name, dpi=fig.dpi)
     print('Market estimation plot has been saved to {}/{}.'.format(os.getcwd(), fig_name))
 
@@ -105,9 +105,9 @@ def plot_sector_estimates(data: dict, info: dict, est: np.array, std: np.array):
             plt.legend(ll, labels, loc="upper left")
     plt.tight_layout()
 
-    if not os.path.exists('data/processed_data/plot_indicators'):
-        os.mkdir('data/processed_data/plot_indicators')
-    fig_name = 'data/processed_data/plot_indicators/sector_estimation.png'
+    if not os.path.exists('data/processed_data/plot_volatile'):
+        os.mkdir('data/processed_data/plot_volatile')
+    fig_name = 'data/processed_data/plot_volatile/sector_estimation.png'
     fig.savefig(fig_name, dpi=fig.dpi)
     print('Sector estimation plot has been saved to {}/{}.'.format(os.getcwd(), fig_name))
 
@@ -168,9 +168,9 @@ def plot_industry_estimates(data: dict, info: dict, est: np.array, std: np.array
             plt.legend(ll, labels, loc="upper left")
     plt.tight_layout()
 
-    if not os.path.exists('data/processed_data/plot_indicators'):
-        os.mkdir('data/processed_data/plot_indicators')
-    fig_name = 'data/processed_data/plot_indicators/industry_estimation.png'
+    if not os.path.exists('data/processed_data/plot_volatile'):
+        os.mkdir('data/processed_data/plot_volatile')
+    fig_name = 'data/processed_data/plot_volatile/industry_estimation.png'
     fig.savefig(fig_name, dpi=fig.dpi)
     print('Industry estimation plot has been saved to {}/{}.'.format(os.getcwd(), fig_name))
 
@@ -245,14 +245,14 @@ def plot_stock_estimates(data: dict, est: np.array, std: np.array, rank_type: st
                 plt.legend(ll, labels, loc="upper left")
         plt.tight_layout()
 
-        if not os.path.exists('data/processed_data/plot_indicators'):
-            os.mkdir('data/processed_data/plot_indicators')
-        fig_name = 'data/processed_data/plot_indicators/stock_estimation.png'
+        if not os.path.exists('data/processed_data/plot_volatile'):
+            os.mkdir('data/processed_data/plot_volatile')
+        fig_name = 'data/processed_data/plot_volatile/stock_estimation.png'
         fig.savefig(fig_name, dpi=fig.dpi)
         print('Stock estimation plot has been saved to {}/{}.'.format(os.getcwd(), fig_name))
 
-    elif os.path.exists('data/processed_data/plot_indicators/stock_estimation.png'):
-        os.remove('data/processed_data/plot_indicators/stock_estimation.png')
+    elif os.path.exists('data/processed_data/plot_volatile/stock_estimation.png'):
+        os.remove('data/processed_data/plot_volatile/stock_estimation.png')
 
 
 def plot_matches(data: dict, matches: dict):
@@ -296,9 +296,9 @@ def plot_matches(data: dict, matches: dict):
         plt.legend(ll, labels, loc="upper left")
     plt.tight_layout()
 
-    if not os.path.exists('data/processed_data/plot_indicators'):
-        os.mkdir('data/processed_data/plot_indicators')
-    fig_name = 'data/processed_data/plot_indicators/matches_estimation.png'
+    if not os.path.exists('data/processed_data/plot_volatile'):
+        os.mkdir('data/processed_data/plot_volatile')
+    fig_name = 'data/processed_data/plot_volatile/matches_estimation.png'
     print('Matches estimation plot has been saved to {}/{}.'.format(os.getcwd(), fig_name))
     fig.savefig(fig_name, dpi=fig.dpi)
 
@@ -375,8 +375,8 @@ def plot_chosen_stocks_exploration(data, est, std, idx_choice_all, num_cols=3):
         plt.legend(ll, labels, loc="upper left")
     plt.tight_layout()
 
-    if not os.path.exists('data/processed_data/plot_indicators'):
-        os.mkdir('data/processed_data/plot_indicators')
-    fig_name = 'data/processed_data/plot_indicators/exploration_chosen_stocks.png'
+    if not os.path.exists('data/processed_data/plot_volatile'):
+        os.mkdir('data/processed_data/plot_volatile')
+    fig_name = 'data/processed_data/plot_volatile/exploration_chosen_stocks.png'
     print('Plot of the stocks chosen during the exploration has been saved to {}/{}.'.format(os.getcwd(), fig_name))
     fig.savefig(fig_name, dpi=fig.dpi)
