@@ -1,14 +1,9 @@
 #!/usr/bin/env python
 import os
-
-from classes import Screener_value
-
-os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "1"
 os.environ["OMP_NUM_THREADS"] = "4"
 import sys
-import datetime as dt
 from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter, SUPPRESS
-from json import tool
 import os.path
 import pickle
 
@@ -18,7 +13,7 @@ from classes.Screener_ma import screener_ma
 from classes.Screener_value import screener_value
 import classes.IndexListFetcher as Index
 import classes.Tools as tools
-from classes.Send_email import EmailServer
+from classes.Send_email import send_email, send_email_volatile
 from classes.Plot_indicators import plot_strategy_multiple
 from classes.Screener_ma import add_signal_indicators
 
@@ -105,19 +100,6 @@ def save_data(data):
     with open("data.pickle", "wb") as handle:
         pickle.dump(data, handle)
 
-def send_email(market: str, analysis: str, out_dir: str):
-    # Send email with screener_ma reports
-    timestamp = dt.datetime.now().strftime("%d-%m-%y")
-    email_server = EmailServer("email_config.json")
-    email_subject = f"{analysis} for {market} on {timestamp}"
-    email_message = f"{analysis} for {market} on {timestamp}"
-    email_server.send_svg_attachment(
-        email_subject,
-        email_message,
-        svg_folder=out_dir,
-        mock=False,
-    )
-
 def screener_value_charts(cache, market: str, index: str, symbols: list):
     if not os.path.exists(f"data/historic_data/{market}"):
         os.mkdir(f"data/historic_data/{market}")
@@ -154,7 +136,7 @@ def main():
             value_index, value_symbols = Index.ind_screener_value_stocks()
             screener_value_charts(cache, market, value_index, value_symbols)
     else:
-        index, symbols = Index.sp_500()
+        index, symbols = Index.dow_jones()
         # symbols = ['meta', 'aapl', 'amzn', 'nflx', 'goog', 'EXPD']
         # index = "test"
         screener_ma_dur = 5
@@ -166,7 +148,13 @@ def main():
     data = load_data(cache, symbols, market, file_prifix, data_dir)
 
     # Start processing data
-    #volatile(args, data)
+    if not os.path.exists("data/processed_data/volatile"):
+        os.mkdir("data/processed_data/volatile")
+    screener_volatile_dir = "data/processed_data/volatile"
+    print("Starting Volatility based screening...")
+    volatile(args, data)
+    send_email_volatile(market, "Volatility", screener_volatile_dir)
+    print("Finished Volatility based screening...")
 
     # Moving average based screening
     if not os.path.exists("data/processed_data/screener_ma"):

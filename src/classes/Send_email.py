@@ -3,11 +3,15 @@ import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.mime.application import MIMEApplication
+from email.mime.image import MIMEImage
 from email.message import EmailMessage
 import mimetypes
 from io import StringIO
 import logging
 import json
+import datetime as dt
+
+from pandas import read_csv
 
 class EmailServer:
 
@@ -65,7 +69,7 @@ class EmailServer:
                     logging.info('Mock: Sent to {}'.format(recipient))
                 else:
                     self.server.sendmail(msg['From'], msg['To'], msg.as_string().encode('utf-8'))
-                    logging.info('Sent to {}'.format(recipient))
+                    logging.info(f"Email with attachment sent successfully to {recipient}")
             except Exception as e:
                 logging.error(f"Error sending email to {recipient}: {e}")
 
@@ -84,15 +88,15 @@ class EmailServer:
                 msg.attach(MIMEText(message, 'html'))
 
                 # Attach CSV file
-                text_stream = StringIO()
-                df.to_csv(text_stream, index=False)
-                msg.attach(MIMEApplication(text_stream.getvalue(), Name=filename))
+                with StringIO() as text_stream:
+                    df.to_csv(text_stream, index=False)
+                    msg.attach(MIMEApplication(text_stream.getvalue(), Name=filename))
 
                 if mock:
                     logging.info('Mock: Sent to {}'.format(recipient))
                 else:
                     self.server.sendmail(msg['From'], msg['To'], msg.as_string().encode('utf-8'))
-                    logging.info('Sent to {}'.format(recipient))
+                    logging.info(f"Email with attachment sent successfully to {recipient}")
             except Exception as e:
                 logging.error(f"Error sending email with attachment to {recipient}: {e}")
 
@@ -101,25 +105,96 @@ class EmailServer:
         if recipient_list is None:
             recipient_list = self.recipient_list
         for recipient in recipient_list:
-            # email content set up
-            msg = EmailMessage()
-            msg['Subject'] = subject
-            msg['From'] = self.smtp_user
-            msg['To'] = recipient
-            msg.add_header('Content-Type', 'text/html')
-            msg.set_content(message, subtype='html')
+            try:
+                # email content set up
+                msg = EmailMessage()
+                msg['Subject'] = subject
+                msg['From'] = self.smtp_user
+                msg['To'] = recipient
+                msg.add_header('Content-Type', 'text/html')
+                msg.set_content(message, subtype='html')
 
-            # Attach and embed SVG files
-            for svg_file in os.listdir(svg_folder):
-                if svg_file.endswith(".svg"):
-                    svg_path = os.path.join(svg_folder, svg_file)
-                    with open(svg_path, 'rb') as svg_file:
-                        svg_content = svg_file.read()
-                        mime_type, _ = mimetypes.guess_type(svg_path)
-                        msg.add_attachment(svg_content, maintype='image', subtype=mime_type, filename=os.path.basename(svg_path))
+                # Attach and embed SVG files
+                for svg_file in os.listdir(svg_folder):
+                    if svg_file.endswith(".svg"):
+                        svg_path = os.path.join(svg_folder, svg_file)
+                        with open(svg_path, 'rb') as svg_file:
+                            svg_content = svg_file.read()
+                            mime_type, _ = mimetypes.guess_type(svg_path)
+                            msg.add_attachment(svg_content, maintype='image', subtype=mime_type, filename=os.path.basename(svg_path))
 
-            if mock:
-                logging.info(f'Mock: Sent to {recipient}')
-            else:
-                self.server.sendmail(msg['From'], msg['To'], msg.as_bytes())
-                logging.info(f'Sent to {recipient}')
+                if mock:
+                    logging.info(f'Mock: Sent to {recipient}')
+                else:
+                    self.server.sendmail(msg['From'], msg['To'], msg.as_bytes())
+                    logging.info(f"Email with attachment sent successfully to {recipient}")
+
+            except Exception as e:
+                logging.error(f"Error sending email with CSV and images to {recipient}: {e}")
+
+
+    def send_csv_and_images(self, subject, message, folder_path=None, recipient_list=None, mock=True):
+        if recipient_list is None:
+            recipient_list = self.recipient_list
+
+        for recipient in recipient_list:
+            try:
+                # Email content setup
+                msg = MIMEMultipart()
+                msg['Subject'] = subject
+                msg['From'] = self.smtp_user
+                msg['To'] = recipient
+                msg.add_header('Content-Type', 'text/html')
+                msg.attach(MIMEText(message, 'html'))
+
+                # Embed CSV and PNG images from the folder
+                if folder_path:
+                    for filename in os.listdir(folder_path):
+                        # Attach CSV file
+                        if filename.lower().endswith('.csv'):
+                            csv_path = os.path.join(folder_path, filename)
+                            with StringIO() as text_stream:
+                                read_csv(text_stream)
+                                msg.attach(MIMEApplication(text_stream.getvalue(), Name=csv_path))
+                            
+                        # Attach PNG file
+                        if filename.lower().endswith('.png'):
+                            image_path = os.path.join(folder_path, filename)
+                            with open(image_path, 'rb') as image_file:
+                                msg_image = MIMEImage(image_file.read(), name=os.path.basename(image_path))
+                                msg.attach(msg_image)
+
+                if mock:
+                    logging.info(f'Mock: Sent to {recipient}')
+                else:
+                    self.server.sendmail(msg['From'], msg['To'], msg.as_string().encode('utf-8'))
+                    logging.info(f"Email with attachment sent successfully to {recipient}")
+            except Exception as e:
+                logging.error(f"Error sending email with CSV and images to {recipient}: {e}")
+
+# Customized email functions
+def send_email(market: str, analysis: str, out_dir: str):
+    # Send email with screener_ma reports
+    timestamp = dt.datetime.now().strftime("%d-%m-%y")
+    email_server = EmailServer("email_config.json")
+    email_subject = f"{analysis} for {market} on {timestamp}"
+    email_message = f"{analysis} for {market} on {timestamp}"
+    email_server.send_svg_attachment(
+        email_subject,
+        email_message,
+        svg_folder=out_dir,
+        mock=False,
+    )
+
+def send_email_volatile(market: str, analysis: str, out_dir: str):
+    # Send email with screener_ma reports
+    timestamp = dt.datetime.now().strftime("%d-%m-%y")
+    email_server = EmailServer("email_config.json")
+    email_subject = f"{analysis} for {market} on {timestamp}"
+    email_message = f"{analysis} for {market} on {timestamp}"
+    email_server.send_csv_and_images(
+        email_subject,
+        email_message,
+        folder_path=out_dir,
+        mock=False,
+    )

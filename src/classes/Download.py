@@ -49,8 +49,8 @@ def download(
         else tickers.replace(",", " ").split()
     )
     tickers = [i for i in tickers if i is not None]
-    print(tickers)
     tickers = list(set([ticker.upper() for ticker in tickers]))
+    print(tickers)
 
     price_data = {}
     company_valuation = {}
@@ -186,10 +186,7 @@ def download(
         )
 
     # download exchange rates and convert to most common currency
-    currencies = [
-        si[ticker]["CURRENCY"] if ticker in si else currencies[ticker]
-        for ticker in tickers
-    ]
+    currencies = [si[ticker]["CURRENCY"] if ticker in si else currencies[ticker] for ticker in tickers]
     ucurrencies, counts = np.unique(currencies, return_counts=True)
     default_currency = ucurrencies[np.argmax(counts)]
     xrates = get_exchange_rates(
