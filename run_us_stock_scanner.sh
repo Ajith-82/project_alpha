@@ -1,21 +1,24 @@
 #!/bin/bash
 
+# Generate a timestamp
+TIMESTAMP=$(date +"%Y-%m-%d %H:%M:%S")
+
 # Define the path to your Python virtual environment
-VIRTUALENV_PATH="/home/ajithkv/projects/StockScanner/myvenv"
+VIRTUALENV_PATH="/data/release/project_alpha/myvenv"
 
 # Activate the virtual environment
 source "$VIRTUALENV_PATH/bin/activate"
 
 # Run your Python script within the virtual environment
-cd /home/ajithkv/projects/StockScanner
+cd /data/release/project_alpha
 
-LOG_FILE="./logs/stock_scanner.log"
+LOG_FILE="./logs/project_alpha_us.log"
 
 # Redirect stdout to the log file with a timestamp
 {
-  echo "Script started at: $(date +'%Y-%m-%d %H:%M:%S')"
+  echo "Script started at: $TIMESTAMP"
   echo "------------------"
-  python ./src/screenipy.py --options us:2:1
+  python ./src/project_alpha.py --no-plots
   echo "------------------"
   echo "Script finished at: $(date +'%Y-%m-%d %H:%M:%S')"
 } >> "$LOG_FILE" 2>&1
