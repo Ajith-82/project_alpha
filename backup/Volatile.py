@@ -248,7 +248,6 @@ def cli_argparser():
     )
     return cli.parse_args()
 
-
 def load_data(cache, symbols: list, market: str):
     if cache and os.path.exists("data.pickle"):
         print("\nLoading last year of data...")
@@ -263,16 +262,11 @@ def load_data(cache, symbols: list, market: str):
         data = download(market, symbols)
     return data
 
-
 def save_data(data):
-    with open("data.pickle", "wb") as handle:
-        pickle.dump(data, handle)
+        with open("data.pickle", "wb") as handle:
+            pickle.dump(data, handle)
 
-
-def volatile(
-    args,
-    data,
-):
+def volatile(args, data,):
     tickers = data["tickers"]
     logp = np.log(data["price"])
 
@@ -472,27 +466,27 @@ def volatile(
 
     if args.save_table:
         tab_name = "data/processed_data/volatile/prediction_table.csv"
-
-        # Creating a DataFrame
-        data = {
-            "SYMBOL": ranked_tickers.tolist(),
-            "SECTOR": ranked_sectors,
-            "INDUSTRY": ranked_industries,
-            "PRICE": [
+        table = zip(
+            ["SYMBOL"] + ranked_tickers.tolist(),
+            ["SECTOR"] + ranked_sectors,
+            ["INDUSTRY"] + ranked_industries,
+            ["PRICE"]
+            + [
                 "{} {}".format(np.round(ranked_p[i, -1], 2), ranked_currencies[i])
                 for i in range(num_stocks)
             ],
-            "RATE": ranked_rates,
-            "GROWTH": ranked_growth.tolist(),
-            "VOLATILITY": ranked_volatility.tolist(),
-            "MATCH": (ranked_matches.tolist() if num_stocks > 1 else ["None"]),
-        }
+            ["RATE"] + ranked_rates,
+            ["GROWTH"] + ranked_growth.tolist(),
+            ["VOLATILITY"] + ranked_volatility.tolist(),
+            ["MATCH"] + (ranked_matches.tolist() if num_stocks > 1 else ["None"]),
+        )
 
-        volatile_df = pd.DataFrame(data)
-
-        # Save the DataFrame to a CSV file
-        volatile_df.to_csv(tab_name, index=False)
-
-        print(f"\nThe prediction table printed above has been saved to {tab_name}.")
-
-    return volatile_df
+        with open(tab_name, "w") as file:
+            wr = csv.writer(file)
+            for row in table:
+                wr.writerow(row)
+        print(
+            "\nThe prediction table printed above has been saved to {}.".format(
+                tab_name
+            )
+        )

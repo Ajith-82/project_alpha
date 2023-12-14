@@ -157,6 +157,7 @@ def screener_ma(data, out_dir, look_back_days=5):
 
     plot_tickers = []
     plot_data = {}
+    screener_ma_data = {}
 
     for ticker in tickers:
         _df = price_data[ticker]
@@ -170,5 +171,8 @@ def screener_ma(data, out_dir, look_back_days=5):
                 )
             plot_tickers.append(ticker)
             plot_data[ticker] = _df
+            screener_ma_data[ticker] = matching_trades
 
     plot_strategy_multiple(plot_tickers, plot_data, out_dir)
+
+    return screener_ma_data

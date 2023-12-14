@@ -1,6 +1,8 @@
 #!/usr/bin/env python
+from curses import raw
 import os
-os.environ["TF_CPP_MIN_LOG_LEVEL"] = "1"
+
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
 os.environ["OMP_NUM_THREADS"] = "4"
 import sys
 from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter, SUPPRESS
@@ -27,7 +29,7 @@ def cli_argparser():
     cli.add_argument(
         "--rank",
         type=str,
-        default="rate",
+        default="growth",
         choices=["rate", "growth", "volatility"],
         help="If `rate`, stocks are ranked in the prediction table and in the stock estimation plot from "
         "the highest below to the highest above trend; if `growth`, ranking is done from the largest"
@@ -100,6 +102,7 @@ def save_data(data):
     with open("data.pickle", "wb") as handle:
         pickle.dump(data, handle)
 
+
 def screener_value_charts(cache, market: str, index: str, symbols: list):
     if not os.path.exists(f"data/historic_data/{market}"):
         os.mkdir(f"data/historic_data/{market}")
@@ -118,6 +121,18 @@ def screener_value_charts(cache, market: str, index: str, symbols: list):
     plot_strategy_multiple(value_symbols, plot_data, screener_out_dir)
     send_email(market, "External screener charts", screener_out_dir)
 
+def add_indicator_plot(market: str, symbols: list, data: dict, out_dir: str):
+    raw_data = data["price_data"]
+    plot_data = {}
+    for symbol in symbols:
+        plot_data[symbol] = add_signal_indicators(raw_data[symbol])
+
+    if not os.path.exists(out_dir):
+        os.mkdir(out_dir)
+    plot_strategy_multiple(symbols, plot_data, out_dir)
+    send_email(market, "Screener charts", out_dir)
+
+
 def main():
     # Cleanup report directories
     tools.cleanup_directory_files("data/processed_data")
@@ -130,17 +145,17 @@ def main():
     if market == "india":
         index, symbols = Index.nse_500()
         #symbols = ['EICHERMOT','HEROMOTOCO','NESTLEIND','ONGC', 'COALINDIA','RELIANCE','BPCL','LTIM','MARUTI','HCLTECH',]
-        #index = "nse_500"
+        #index = "test"
         screener_ma_dur = 3
         if args.value:
             value_index, value_symbols = Index.ind_screener_value_stocks()
             screener_value_charts(cache, market, value_index, value_symbols)
     else:
-        index, symbols = Index.dow_jones()
+        index, symbols = Index.sp_500()
         # symbols = ['meta', 'aapl', 'amzn', 'nflx', 'goog', 'EXPD']
         # index = "test"
         screener_ma_dur = 5
-    
+
     if not os.path.exists(f"data/historic_data/{market}"):
         os.mkdir(f"data/historic_data/{market}")
     data_dir = f"data/historic_data/{market}"
@@ -148,31 +163,36 @@ def main():
     data = load_data(cache, symbols, market, file_prifix, data_dir)
 
     # Start processing data
-    if not os.path.exists("data/processed_data/volatile"):
-        os.mkdir("data/processed_data/volatile")
     screener_volatile_dir = "data/processed_data/volatile"
-    print("Starting Volatility based screening...")
-    volatile(args, data)
-    send_email_volatile(market, "Volatility", screener_volatile_dir)
-    print("Finished Volatility based screening...")
-
+    screener_volatile_top = "data/processed_data/volatile_top"
+    screener_volatile_bottom = "data/processed_data/volatile_bottom"
+    print("\nStarting Volatility based screening...")
+    volatile_data = volatile(args, data)
+    volatile_symbols_top = volatile_data["SYMBOL"].head(100).tolist()
+    volatile_symbols_bottom = volatile_data["SYMBOL"].tail(100).tolist()
+    add_indicator_plot(market, volatile_symbols_top, data, screener_volatile_top)
+    add_indicator_plot(market, volatile_symbols_bottom, data, screener_volatile_bottom)
+    #send_email_volatile(market, "Volatility", screener_volatile_dir)
+    print("\nFinished Volatility based screening...")
+    '''
     # Moving average based screening
     if not os.path.exists("data/processed_data/screener_ma"):
         os.mkdir("data/processed_data/screener_ma")
     screener_ma_dir = "data/processed_data/screener_ma"
-    print("Starting Moving average based screening...")
-    screener_ma(data, screener_ma_dir, screener_ma_dur)
+    print("\nStarting Moving average based screening...")
+    ma_data = screener_ma(data, screener_ma_dir, screener_ma_dur)
     send_email(market, "MA analysis", screener_ma_dir)
-    print("Finished Moving average based screening...")
+    print("\nFinished Moving average based screening...")
 
     # Value stock screening
     if not os.path.exists("data/processed_data/screener_value"):
         os.mkdir("data/processed_data/screener_value")
     screener_value_dir = "data/processed_data/screener_value"
-    print("Starting Value stocks based screening...")
-    screener_value(data, screener_value_dir)
+    print("\nStarting Value stocks based screening...")
+    value_tickers = screener_value(data, screener_value_dir)
     send_email(market, "Value stock screening", screener_value_dir)
-    print("Finished Value stocks based screening...")
+    print("\nFinished Value stocks based screening...")
+    '''
 
 if __name__ == "__main__":
     main()
