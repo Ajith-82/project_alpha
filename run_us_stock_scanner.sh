@@ -1,5 +1,8 @@
 #!/bin/bash
 
+# Set current working directory
+set cwd = `pwd`
+
 # Generate a timestamp
 TIMESTAMP=$(date +"%Y-%m-%d %H:%M:%S")
 
@@ -25,3 +28,5 @@ LOG_FILE="./logs/project_alpha_us.log"
 
 # Deactivate the virtual environment when done (optional)
 deactivate
+
+cd $cwd
