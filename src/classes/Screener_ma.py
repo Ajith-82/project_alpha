@@ -1,43 +1,20 @@
 import pandas as pd
-import pandas_ta as ta
 import numpy as np
-import numpy as np
-from classes.Plot_indicators import plot_strategy_multiple
+import concurrent.futures
 
 
 def add_signal_indicators(df):
-    # Add SMA indicators to data
-    df["SMA_10"] = ta.sma(df["Adj Close"], length=10)
-    df["SMA_30"] = ta.sma(df["Adj Close"], length=30)
-    df["SMA_50"] = ta.sma(df["Adj Close"], length=50)
-    df["SMA_200"] = ta.sma(df["Adj Close"], length=200)
+    df.loc[:, "10_cross_30"] = np.where(df["SMA_10"] > df["SMA_30"], 1, 0)
 
-    # Add MACD indicator to data
-    macd = ta.macd(df["Adj Close"], fast=12, slow=26, signal=9)
-    df["MACD"] = macd["MACD_12_26_9"]
-    df["MACD_signal"] = macd["MACDs_12_26_9"]
-    df["MACD_hist"] = macd["MACDh_12_26_9"]
+    df.loc[:, "MACD_Signal_MACD"] = np.where(df["MACD_signal"] < df["MACD"], 1, 0)
 
-    # Add RSI indicator to data
-    delta = df["Close"].diff(1)
-    gain = delta.where(delta > 0, 0)
-    loss = -delta.where(delta < 0, 0)
-    avg_gain = gain.rolling(window=14).mean()
-    avg_loss = loss.rolling(window=14).mean()
-    rs = avg_gain / avg_loss
-    df["RSI"] = 100 - (100 / (1 + rs))
+    df.loc[:, "MACD_lim"] = np.where(df["MACD"] > 0, 1, 0)
 
-    df["10_cross_30"] = np.where(df["SMA_10"] > df["SMA_30"], 1, 0)
-
-    df["MACD_Signal_MACD"] = np.where(df["MACD_signal"] < df["MACD"], 1, 0)
-
-    df["MACD_lim"] = np.where(df["MACD"] > 0, 1, 0)
-
-    df["abv_50"] = np.where(
+    df.loc[:, "abv_50"] = np.where(
         (df["SMA_30"] > df["SMA_50"]) & (df["SMA_10"] > df["SMA_50"]), 1, 0
     )
 
-    df["abv_200"] = np.where(
+    df.loc[:, "abv_200"] = np.where(
         (df["SMA_30"] > df["SMA_200"])
         & (df["SMA_10"] > df["SMA_200"])
         & (df["SMA_50"] > df["SMA_200"]),
@@ -116,7 +93,7 @@ def find_stocks_meeting_conditions(data, signals, lookback_days):
     return matching_stocks
 
 
-def stock_meets_conditions(ticker, data, signals, lookback_days):
+def find_matching_trades(ticker, data, signals, lookback_days):
     matching_trades = []
     data_one = data.reset_index()
     for _, row in data_one.tail(lookback_days).iterrows():
@@ -141,38 +118,43 @@ def stock_meets_conditions(ticker, data, signals, lookback_days):
     return matching_trades
 
 
-def screener_ma(data, out_dir, look_back_days=5):
+def screener_ma(data, look_back_days=5):
+    """
+    Generate a moving average screener for a given set of stocks based on various signal indicators.
+    
+    Args:
+        data (dict): A dictionary containing "tickers" and "price_data".
+        look_back_days (int): The number of days to look back for calculating the moving averages. Default is 5.
+        
+    Returns:
+        dict: A dictionary containing the matching trades for each stock based on the specified conditions.
+    """
     tickers = data["tickers"]
     price_data = data["price_data"]
-    signals = pd.DataFrame(
-        {
-            "10_cross_30": [0, 0, 1, 1, 1],
-            "MACD_Signal_MACD": [1, 1, 1, 0, 0],
-            "MACD_lim": [0, 0, 0, 1, 1],
-            "abv_50": [1, 1, 1, 0, 0],
-            "abv_200": [0, 1, 0, 0, 1],
-            "strategy": [1, 2, 3, 4, 5],
-        }
-    )
+    signals = pd.DataFrame({
+        "10_cross_30": [0, 0, 1, 1, 1],
+        "MACD_Signal_MACD": [1, 1, 1, 0, 0],
+        "MACD_lim": [0, 0, 0, 1, 1],
+        "abv_50": [1, 1, 1, 0, 0],
+        "abv_200": [0, 1, 0, 0, 1],
+        "strategy": [1, 2, 3, 4, 5],
+    })
 
-    plot_tickers = []
-    plot_data = {}
-    screener_ma_data = {}
+    screener_data = {}
 
-    for ticker in tickers:
-        _df = price_data[ticker]
-        _df = add_signal_indicators(_df)
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        results = {executor.submit(process_stock, ticker, price_data[ticker], signals, look_back_days): ticker for ticker in tickers}
+        for future in concurrent.futures.as_completed(results):
+            ticker = results[future]
+            try:
+                matching_trades = future.result()
+                if matching_trades:
+                    screener_data[ticker] = matching_trades
+            except Exception as e:
+                print(f"Error processing {ticker}: {e}")
 
-        matching_trades = stock_meets_conditions(ticker, _df, signals, look_back_days)
-        if len(matching_trades) > 0:
-            for trade in matching_trades:
-                print(
-                    f"The {trade['stock']} meets strategy {trade['strategy']} on {trade['buy_date']}"
-                )
-            plot_tickers.append(ticker)
-            plot_data[ticker] = _df
-            screener_ma_data[ticker] = matching_trades
+    return screener_data
 
-    plot_strategy_multiple(plot_tickers, plot_data, out_dir)
-
-    return screener_ma_data
+def process_stock(ticker, stock_data, signals, look_back_days):
+    stock_data = add_signal_indicators(stock_data)
+    return find_matching_trades(ticker, stock_data, signals, look_back_days)

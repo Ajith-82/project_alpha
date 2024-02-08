@@ -9,15 +9,15 @@ from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter, SUPPRESS
 import os.path
 import pickle
 
-from classes.Download import download
+from classes.Download import load_data, load_volatile_data
 from classes.Volatile import volatile
 from classes.Screener_ma import screener_ma
+from classes.Screener_macd import macd_screener
+from classes.Screener_donchain import donchain_screener
 from classes.Screener_value import screener_value
 import classes.IndexListFetcher as Index
 import classes.Tools as tools
-from classes.Send_email import send_email, send_email_volatile
-from classes.Plot_indicators import plot_strategy_multiple
-from classes.Screener_ma import add_signal_indicators
+from classes.Plot_stocks import create_plot_and_email
 
 
 def cli_argparser():
@@ -73,35 +73,6 @@ def cli_argparser():
     return cli.parse_args()
 
 
-def load_data(cache, symbols=None, market="", file_prefix="", data_dir=""):
-    while cache:
-        print("\nLoading historical data...")
-        data = tools.load_cache(file_prefix, data_dir)
-        if bool(data):
-            return data
-        else:
-            cache = ""
-
-    if symbols is None:
-        symbols_file_path = "symbols_list.txt"
-        if os.path.exists(symbols_file_path):
-            with open(symbols_file_path, "r") as my_file:
-                symbols = my_file.readline().split(" ")
-        else:
-            print(f"No symbols information to download data. Exit script.")
-            sys.exit()
-
-    print("\nDownloading historical data...")
-    data = download(market, symbols)
-    tools.save_dict_with_timestamp(data, file_prefix, data_dir)
-
-    return data
-
-
-def save_data(data):
-    with open("data.pickle", "wb") as handle:
-        pickle.dump(data, handle)
-
 
 def screener_value_charts(cache, market: str, index: str, symbols: list):
     if not os.path.exists(f"data/historic_data/{market}"):
@@ -144,13 +115,13 @@ def main():
     # Load data
     if market == "india":
         index, symbols = Index.nse_500()
-        screener_ma_dur = 3
+        screener_dur = 3
         if args.value:
             value_index, value_symbols = Index.ind_screener_value_stocks()
             screener_value_charts(cache, market, value_index, value_symbols)
     else:
         index, symbols = Index.sp_500()
-        screener_ma_dur = 5
+        screener_dur = 3
 
     if not os.path.exists(f"data/historic_data/{market}"):
         os.mkdir(f"data/historic_data/{market}")
@@ -159,16 +130,43 @@ def main():
     data = load_data(cache, symbols, market, file_prifix, data_dir)
 
     # Start processing data
+    '''
     screener_volatile_top = "data/processed_data/volatile_top"
     screener_volatile_bottom = "data/processed_data/volatile_bottom"
     print("\nStarting Volatility based screening...")
-    volatile_data = volatile(args, data)
-    volatile_symbols_top = volatile_data["SYMBOL"].head(100).tolist()
-    volatile_symbols_bottom = volatile_data["SYMBOL"].tail(100).tolist()
-    add_indicator_plot("Volatile top 100", market, volatile_symbols_top, data, screener_volatile_top)
-    add_indicator_plot("Volatile bottom 100", market, volatile_symbols_bottom, data, screener_volatile_bottom)
+    volatile_data = load_volatile_data(market, data)
+    volatile_df = volatile(args, volatile_data)
+    volatile_symbols_top = volatile_df["SYMBOL"].head(100).tolist()
+    volatile_symbols_bottom = volatile_df["SYMBOL"].tail(100).tolist()
+    create_plot_and_email("Volatile top 100", market, volatile_symbols_top, data, screener_volatile_top)
+    create_plot_and_email("Volatile bottom 100", market, volatile_symbols_bottom, data, screener_volatile_bottom)
     print("\nFinished Volatility based screening...")
 
+    # Start MA screener
+    ma_screener_out_dir = "data/processed_data/screener_ma"
+    print("\nStarting MA based screening...")
+    ma_screener_out = screener_ma(data, screener_dur)
+    ma_screener_symbols =list(ma_screener_out.keys())
+    create_plot_and_email("MA screener", market, ma_screener_symbols, data, ma_screener_out_dir)
+    print("\nFinished MA based screening...")
+    '''
+
+    # Start MACD screener
+    macd_screener_out_dir = "data/processed_data/screener_macd"
+    print("\nStarting MACD based screening...")
+    macd_screener_out = macd_screener(data, screener_dur)
+    macd_screener_symbols = macd_screener_out["BUY"]
+    create_plot_and_email("MACD screener", market, macd_screener_symbols, data, macd_screener_out_dir)
+    print("\nFinished MACD based screening...")
+
+    # Start Donchain screener
+    macd_screener_out_dir = "data/processed_data/screener_donchain"
+    print("\nStarting Donchain based screening...")
+    donchain_screener_out = donchain_screener(data, screener_dur)
+    donchain_screener_symbols = donchain_screener_out["BUY"]
+    print(donchain_screener_symbols)
+    create_plot_and_email("Donchain screener", market, donchain_screener_symbols, data, macd_screener_out_dir)
+    print("\nFinished Donchain based screening...")
 
 if __name__ == "__main__":
     main()

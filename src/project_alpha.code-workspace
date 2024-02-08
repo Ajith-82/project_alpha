@@ -11,6 +11,9 @@
 		},
 		{
 			"path": "../../PKScreener"
+		},
+		{
+			"path": "../../Screeni-py"
 		}
 	],
 	"settings": {}

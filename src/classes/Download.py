@@ -1,24 +1,71 @@
 #!/usr/bin/env python
-import os.path
-import requests
-import pandas as pd
-import multitasking
+import os
+import sys
+import pickle
 import csv
+import requests
 import numpy as np
-import datetime as dt
+from typing import Dict, List, Union
+from datetime import datetime, timedelta
+import multitasking
+import pandas as pd
 import yfinance as yf
 from typing import Union
+from classes.Add_indicators import add_indicators
+from classes.Tools import ProgressBar, save_dict_with_timestamp
+from classes.Add_indicators import add_indicators
 
-from classes.Tools import ProgressBar
+
+def _handle_start_end_dates(start, end):
+    if end is None:
+        end = int(datetime.timestamp(datetime.today()))
+    elif isinstance(end, str):
+        end = int(datetime.timestamp(datetime.strptime(end, "%Y-%m-%d")))
+    if start is None:
+        start = int(datetime.timestamp(datetime.today() - timedelta(730)))
+    elif isinstance(start, str):
+        start = int(datetime.timestamp(datetime.strptime(start, "%Y-%m-%d")))
+    return start, end
+
+
+def load_cache(file_prefix, source_dir="."):
+    """
+    Load a dictionary from a file.
+
+    Parameters:
+    - file_prefix: str, the prefix for the file (without extension).
+    - source_dir: str, the source directory for the file (default is the current directory).
+
+    Returns:
+    - dict or None: The loaded dictionary or None if the file doesn't exist.
+    """
+    # Generate timestamp in YYMMDD format
+    timestamp = datetime.now().strftime("%y%m%d")
+
+    # Create a new file name with the timestamp
+    file_path = os.path.join(source_dir, f"{file_prefix}_{timestamp}.pkl")
+
+    if os.path.exists(file_path):
+        try:
+            with open(file_path, "rb") as file:
+                loaded_dict = pickle.load(file)
+                print(f"Using data saved to {file.name}.")
+                return loaded_dict
+        except Exception as e:
+            print(f"Error loading dictionary: {e}")
+            return {}
+    else:
+        print(f"File not found: {file_path}")
+        return {}
 
 
 def download(
     market: str,
-    tickers: list,
+    tickers: List[str],
     start: Union[str, int] = None,
     end: Union[str, int] = None,
     interval: str = "1d",
-) -> dict:
+) -> Dict[str, Union[List[str], Dict[str, pd.DataFrame], Dict[str, str]]]:
     """
     Download historical data for tickers in the list.
 
@@ -38,56 +85,33 @@ def download(
     data: dict
         Dictionary including the following keys:
         - tickers: list of tickers
-        - logp: array of log-adjusted closing prices, shape=(num stocks, length period);
-        - volume: array of volumes, shape=(num stocks, length period);
-        - sectors: dictionary of stock sector for each ticker;
-        - industries: dictionary of stock industry for each ticker.
+        - price_data: dictionary of pandas dataframes with stock prices
+        - company_info: dictionary of company information
     """
     tickers = (
         tickers
         if isinstance(tickers, (list, set, tuple))
         else tickers.replace(",", " ").split()
     )
-    tickers = [i for i in tickers if i is not None]
-    tickers = list(set([ticker.upper() for ticker in tickers]))
+    tickers = [ticker.upper() for ticker in tickers if ticker is not None]
+    tickers = list(set(tickers))
 
     price_data = {}
     company_info = {}
-    data = {}
-    si_columns = ["SYMBOL", "CURRENCY", "SECTOR", "INDUSTRY"]
-    if market == "india":
-        si_filename = "data/historic_data/india/stock_info.csv"
-    else:
-        si_filename = "data/historic_data/us/stock_info.csv"
-    if not os.path.exists(si_filename):
-        # create a .csv to store stock information
-        with open(si_filename, "w") as file:
-            wr = csv.writer(file)
-            wr.writerow(si_columns)
-    # load stock information file
-    si = pd.read_csv(si_filename)
-    missing_tickers = [
-        ticker for ticker in tickers if ticker not in si["SYMBOL"].values
-    ]
-    missing_si = {}
-    currencies = {}
 
-    if end is None:
-        end = dt.datetime.today().strftime("%Y-%m-%d")
-    elif type(end) == str:
-        end = dt.datetime.strptime(end, "%Y-%m-%d")
-
-    if start is None:
-        start = (dt.datetime.now() - dt.timedelta(1000)).strftime("%Y-%m-%d")
-    elif type(start) == str:
-        start = dt.datetime.strptime(start, "%Y-%m-%d")
+    start, end = _handle_start_end_dates(start, end)
 
     @multitasking.task
-    def _download_one_threaded(
-        market: str, ticker: str, start: str, end: str, interval: str = "1d"
+    def download_one_threaded(
+        market: str,
+        ticker: str,
+        start: str,
+        end: str,
+        interval: str = "1d",
     ):
         """
-        Download historical data for a single ticker with multithreading. Plus, it scrapes missing stock information.
+        Download historical data for a single ticker with multithreading.
+        Plus, it scrapes missing stock information.
 
         Parameters
         ----------
@@ -101,41 +125,14 @@ def download(
             End download data at this date.
         """
         ticker_data = download_stock_data(market, ticker, start, end, interval)
-        price_data_one = ticker_data["price_data"]
-        company_info_one = ticker_data["company_info"]
+        data = ticker_data["price_data"]
+        info = ticker_data["company_info"]
 
-        try:
-            if isinstance(price_data_one, pd.DataFrame):
-                price_data[ticker] = price_data_one
-                # Create a new DataFrame with the same index
-                data_one = pd.DataFrame(index=price_data_one.index)
-                # List of columns to copy
-                columns_to_copy = ["Adj Close", "Volume"]
-                # Copy the specified columns from the original DataFrame to the new DataFrame
-                for col in columns_to_copy:
-                    data_one[col] = price_data_one[col]
-                data[ticker] = data_one
+        if isinstance(data, pd.DataFrame):
+            price_data[ticker] = data
+        if info:
+            company_info[ticker] = info
 
-            if len(company_info_one) != 0:
-                company_info[ticker] = company_info_one
-
-            if ticker in missing_tickers:
-                if market == "india":
-                    currencies[ticker] = "INR"
-                else:
-                    currencies[ticker] = "USD"
-                try:
-                    assert (
-                        (len(company_info_one["sector"]) > 0)
-                        and (len(company_info_one["industry"]) > 0)
-                    )
-                    missing_si[ticker] = dict(
-                        sector=company_info_one["sector"], industry=company_info_one["industry"]
-                    )
-                except:
-                    pass
-        except Exception as e:
-            print(f"Error in data download for {ticker}: {e}")
         progress.animate()
 
     num_threads = min([len(tickers), multitasking.cpu_count() * 2])
@@ -144,74 +141,16 @@ def download(
     progress = ProgressBar(len(tickers), "completed")
 
     for ticker in tickers:
-        _download_one_threaded(market, ticker, start, end, interval)
+        download_one_threaded(market, ticker, start, end, interval)
     multitasking.wait_for_tasks()
 
     progress.completed()
 
-    if len(data) == 0:
+    if len(price_data) == 0:
         raise Exception("No symbol with full information is available.")
 
-    data = pd.concat(data.values(), keys=data.keys(), axis=1, sort=True)
-    data.drop(
-        columns=data.columns[data.isnull().sum(0) > 0.33 * data.shape[0]], inplace=True
-    )
-    data = data.ffill().bfill().drop_duplicates()
-
-    info = zip(
-        list(missing_si.keys()),
-        [currencies[ticker] for ticker in missing_si.keys()],
-        [v["sector"] for v in missing_si.values()],
-        [v["industry"] for v in missing_si.values()],
-    )
-    with open(si_filename, "a+", newline="") as file:
-        wr = csv.writer(file)
-        for row in info:
-            wr.writerow(row)
-    si = pd.read_csv(si_filename).set_index("SYMBOL").to_dict(orient="index")
-
-    missing_tickers = [
-        ticker
-        for ticker in tickers
-        if ticker not in data.columns.get_level_values(0)[::2].tolist()
-    ]
-    tickers = data.columns.get_level_values(0)[::2].tolist()
-    if len(missing_tickers) > 0:
-        print(
-            "\nRemoving {} from list of symbols because we could not collect full information.".format(
-                missing_tickers
-            )
-        )
-
-    # download exchange rates and convert to most common currency
-    currencies = [
-        si[ticker]["CURRENCY"] if ticker in si else currencies[ticker]
-        for ticker in tickers
-    ]
-    ucurrencies, counts = np.unique(currencies, return_counts=True)
-    default_currency = ucurrencies[np.argmax(counts)]
-    xrates = get_exchange_rates(
-        currencies, default_currency, data.index, start, end, interval
-    )
-
     return dict(
-        tickers=tickers,
-        dates=pd.to_datetime(data.index),
-        price=data.iloc[:, data.columns.get_level_values(1) == "Adj Close"]
-        .to_numpy()
-        .T,
-        volume=data.iloc[:, data.columns.get_level_values(1) == "Volume"].to_numpy().T,
-        currencies=currencies,
-        exchange_rates=xrates,
-        default_currency=default_currency,
-        sectors={
-            ticker: si[ticker]["SECTOR"] if ticker in si else "NA_" + ticker
-            for ticker in tickers
-        },
-        industries={
-            ticker: si[ticker]["INDUSTRY"] if ticker in si else "NA_" + ticker
-            for ticker in tickers
-        },
+        tickers=list(price_data.keys()),
         price_data=price_data,
         company_info=company_info,
     )
@@ -237,14 +176,15 @@ def download_stock_data(
     # If the market is India, append ".NS" to the ticker symbol
     if market == "india":
         ticker = f"{ticker}.NS"
-    company_info = {}
 
     try:
         # Create a Ticker object for the specified stock
         ticker_obj = yf.Ticker(ticker)
 
         # Download historical price data
-        price_data = ticker_obj.history(interval=interval, start=start_date, end=end_date)
+        price_data = ticker_obj.history(
+            interval=interval, start=start_date, end=end_date
+        )
         price_data.index = price_data.index.strftime("%Y-%m-%d")
         price_data.sort_index(inplace=True)
 
@@ -263,53 +203,184 @@ def download_stock_data(
             ]
         )
         price_data = price_data.loc[~price_data.index.duplicated(keep="first")]
+        price_data = price_data.ffill().bfill().drop_duplicates()
+        price_data = add_indicators(price_data)
+        price_data.fillna(0, inplace=True)
 
         # Get additional stock information using yahooquery
         company_info = ticker_obj.info
     except Exception as e:
         print(f"Error in data download for {ticker}: {e}")
-        
+        return {"price_data": None, "company_info": None}
+
     # Return a dictionary containing price data and stock information
     return {"price_data": price_data, "company_info": company_info}
 
 
-def _parse_quotes(data: dict, parse_volume: bool = True) -> pd.DataFrame:
+def load_data(
+    cache: str,
+    symbols: List[str] = None,
+    market: str = "",
+    file_prefix: str = "",
+    data_dir: str = "",
+) -> dict:
     """
-    It creates a data frame of adjusted closing prices, and, if `parse_volume=True`, volumes. If no adjusted closing
-    price is available, it sets it equal to closing price.
+    Load historical data from cache or download it if not available.
 
-    Parameters
-    ----------
-    data: dict
-        Data containing historical information of corresponding stock.
-    parse_volume: bool
-        Include or not volume information in the data frame.
+    Args:
+        cache (str): Cache indicator. If not empty, the function will try to load data from cache.
+        symbols (List[str], optional): List of symbols to download data for. Defaults to None.
+        market (str, optional): Market information. Defaults to "".
+        file_prefix (str, optional): Prefix for the file to save the data. Defaults to "".
+        data_dir (str, optional): Directory to save the data. Defaults to "".
+
+    Returns:
+        dict: Dictionary containing the historical data.
     """
-    timestamps = data["timestamp"]
-    ohlc = data["indicators"]["quote"][0]
-    closes = ohlc["close"]
-    if parse_volume:
-        volumes = ohlc["volume"]
-    try:
-        adjclose = data["indicators"]["adjclose"][0]["adjclose"]
-    except:
-        adjclose = closes
+    while cache:
+        print("\nLoading historical data...")
+        data = load_cache(file_prefix, data_dir)
+        if data:
+            return data
+        else:
+            cache = ""
 
-    # fix NaNs in the second-last entry of adjusted closing prices
-    if adjclose[-2] is None:
-        adjclose[-2] = adjclose[-1]
+    if symbols is None:
+        symbols_file_path = "symbols_list.txt"
+        if os.path.exists(symbols_file_path):
+            with open(symbols_file_path, "r") as my_file:
+                symbols = my_file.readline().split(" ")
+        else:
+            print("No symbols information to download data. Exit script.")
+            sys.exit()
 
-    assert (np.array(adjclose) > 0).all()
+    print("\nDownloading historical data...")
+    data = download(market, symbols)
+    save_dict_with_timestamp(data, file_prefix, data_dir)
 
-    quotes = {"Adj Close": adjclose}
-    if parse_volume:
-        quotes["Volume"] = volumes
-    quotes = pd.DataFrame(quotes)
-    quotes.index = pd.to_datetime(timestamps, unit="s").date
-    quotes.sort_index(inplace=True)
-    quotes = quotes.loc[~quotes.index.duplicated(keep="first")]
+    return data
 
-    return quotes
+
+def load_volatile_data(
+    market: str,
+    data: Dict,
+    start: Union[str, int] = None,
+    end: Union[str, int] = None,
+    interval: str = "1d",
+) -> Dict:
+    """
+    Load volatile data for the given market and data, within the specified time interval.
+    :param market: str - the market for which the data is being loaded
+    :param data: Dict - the data to be loaded
+    :param start: Union[str, int] - the start date or index for the data
+    :param end: Union[str, int] - the end date or index for the data
+    :param interval: str - the time interval for the data
+    :return: Dict - the loaded volatile data
+    """
+
+    start, end = _handle_start_end_dates(start, end)
+
+    tickers = data["tickers"]
+    si_columns = ["SYMBOL", "CURRENCY", "SECTOR", "INDUSTRY"]
+    si_filename = (
+        f"data/historic_data/{'india' if market == 'india' else 'us'}/stock_info.csv"
+    )
+    if not os.path.exists(si_filename):
+        with open(si_filename, "w") as file:
+            wr = csv.writer(file)
+            wr.writerow(si_columns)
+
+    si = pd.read_csv(si_filename)
+    missing_tickers = [
+        ticker for ticker in tickers if ticker not in si["SYMBOL"].values
+    ]
+    missing_si = {}
+    currencies = {}
+    volatile_data = {}
+
+    for ticker in tickers:
+        data_one = data["price_data"][ticker]
+        columns_to_copy = ["Adj Close", "Volume"]
+        data_one = data_one[columns_to_copy]
+        volatile_data[ticker] = data_one
+
+        if ticker in missing_tickers:
+            currencies[ticker] = "INR" if market == "india" else "USD"
+            sector_value = data["company_info"][ticker]["sector"]
+            if isinstance(sector_value, list):
+                sector_value = sector_value[0]
+            industry_value = data["company_info"][ticker]["industry"]
+            if isinstance(industry_value, list):
+                industry_value = industry_value[0]
+
+            if sector_value and industry_value:
+                missing_si[ticker] = {
+                    "sector": sector_value,
+                    "industry": industry_value,
+                }
+
+    if not volatile_data:
+        raise Exception("No symbol with full information is available.")
+
+    volatile_data = pd.concat(volatile_data.values(), keys=volatile_data.keys(), axis=1, sort=True)
+    volatile_data.drop(
+        columns=volatile_data.columns[volatile_data.isnull().sum(0) > 0.33 * volatile_data.shape[0]], inplace=True
+    )
+    volatile_data = volatile_data.ffill().bfill().drop_duplicates()
+
+    info = zip(
+        list(missing_si.keys()),
+        [currencies[ticker] for ticker in missing_si.keys()],
+        [v["sector"] for v in missing_si.values()],
+        [v["industry"] for v in missing_si.values()],
+    )
+    with open(si_filename, "a+", newline="") as file:
+        wr = csv.writer(file)
+        for row in info:
+            wr.writerow(row)
+
+    si = pd.read_csv(si_filename).set_index("SYMBOL").to_dict(orient="index")
+
+    missing_tickers = [
+        ticker
+        for ticker in tickers
+        if ticker not in volatile_data.columns.get_level_values(0)[::2].tolist()
+    ]
+    tickers = volatile_data.columns.get_level_values(0)[::2].tolist()
+
+    if missing_tickers:
+        print(
+            "\nRemoving {} from list of symbols because we could not collect full information.".format(
+                missing_tickers
+            )
+        )
+
+    currencies = [
+        si.get(ticker, {}).get("CURRENCY", currencies.get(ticker)) for ticker in tickers
+    ]
+    ucurrencies, counts = np.unique(currencies, return_counts=True)
+    default_currency = ucurrencies[np.argmax(counts)]
+    xrates = get_exchange_rates(
+        currencies, default_currency, volatile_data.index, start, end, interval
+    )
+
+    return {
+        "tickers": tickers,
+        "dates": pd.to_datetime(volatile_data.index),
+        "price": volatile_data.xs("Adj Close", level=1, axis=1).to_numpy().T,
+        "volume": volatile_data.xs("Volume", level=1, axis=1).to_numpy().T,
+        "currencies": currencies,
+        "exchange_rates": xrates,
+        "default_currency": default_currency,
+        "sectors": {
+            ticker: si.get(ticker, {}).get("SECTOR", "NA_" + ticker)
+            for ticker in tickers
+        },
+        "industries": {
+            ticker: si.get(ticker, {}).get("INDUSTRY", "NA_" + ticker)
+            for ticker in tickers
+        },
+    }
 
 
 def get_exchange_rates(
@@ -344,16 +415,29 @@ def get_exchange_rates(
     xrates: dict
         A dictionary with currencies as keys and list of exchange rates at desired dates as values.
     """
-    if end is None:
-        end = int(dt.datetime.timestamp(dt.datetime.today()))
-    elif type(end) == str:
-        end = int(dt.datetime.timestamp(dt.datetime.strptime(end, "%Y-%m-%d")))
-    if start is None:
-        start = int(dt.datetime.timestamp(dt.datetime.today() - dt.timedelta(365)))
-    elif type(start) == str:
-        start = int(dt.datetime.timestamp(dt.datetime.strptime(start, "%Y-%m-%d")))
-
+    start, end = _handle_start_end_dates(start, end)
     ucurrencies, counts = np.unique(from_currencies, return_counts=True)
+    xrates = _process_exchange_rates(
+        ucurrencies, to_currency, dates, start, end, interval
+    )
+    return xrates
+
+
+def _process_exchange_rates(ucurrencies, to_currency, dates, start, end, interval):
+    """
+    Process exchange rates for given currencies and time period.
+
+    Args:
+        ucurrencies (list): List of currencies to process.
+        to_currency (str): The target currency to convert to.
+        dates (list): List of dates for the exchange rates.
+        start (str): Start date for the exchange rates.
+        end (str): End date for the exchange rates.
+        interval (str): Interval for the exchange rates.
+
+    Returns:
+        pandas.DataFrame: Processed exchange rates.
+    """
     tmp = {}
     if to_currency not in ucurrencies or len(ucurrencies) > 1:
         for curr in ucurrencies:
@@ -395,15 +479,56 @@ def _download_one(ticker: str, start: int, end: int, interval: str = "1d") -> di
         Scraped dictionary of information.
     """
     base_url = "https://query1.finance.yahoo.com"
-    params = dict(
-        period1=start, period2=end, interval=interval.lower(), includePrePost=False
-    )
-    url = "{}/v8/finance/chart/{}".format(base_url, ticker)
+    params = {
+        "period1": start,
+        "period2": end,
+        "interval": interval.lower(),
+        "includePrePost": False,
+    }
+    url = f"{base_url}/v8/finance/chart/{ticker}"
     headers = {
         "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_11_5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/50.0.2661.102 Safari/537.36"
     }
-    data = requests.get(url=url, params=params, headers=headers)
-    if "Will be right back" in data.text:
+    response = requests.get(url, params=params, headers=headers)
+    if "Will be right back" in response.text:
         raise RuntimeError("*** YAHOO! FINANCE is currently down! ***\n")
-    data = data.json()
-    return data
+    return response.json()
+
+
+def _parse_quotes(data: dict, parse_volume: bool = True) -> pd.DataFrame:
+    """
+    Creates a data frame of adjusted closing prices, and optionally includes volume information.
+
+    Parameters
+    ----------
+    data: dict
+        Data containing historical information of corresponding stock.
+    parse_volume: bool
+        Include or not volume information in the data frame.
+    """
+    timestamps = data["timestamp"]
+    ohlc = data["indicators"]["quote"][0]
+    closes = ohlc["close"]
+
+    volumes = ohlc["volume"] if parse_volume else None
+    adjclose = (
+        data["indicators"]["adjclose"][0]["adjclose"]
+        if "adjclose" in data["indicators"]
+        else closes
+    )
+
+    # fix NaNs in the second-last entry of adjusted closing prices
+    if adjclose[-2] is None:
+        adjclose[-2] = adjclose[-1]
+
+    assert (np.array(adjclose) > 0).all()
+
+    quotes = {"Adj Close": adjclose}
+    if parse_volume:
+        quotes["Volume"] = volumes
+    quotes = pd.DataFrame(quotes)
+    quotes.index = pd.to_datetime(timestamps, unit="s").date
+    quotes.sort_index(inplace=True)
+    quotes = quotes.loc[~quotes.index.duplicated(keep="first")]
+
+    return quotes

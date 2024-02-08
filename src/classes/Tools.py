@@ -4,7 +4,9 @@ import os
 import datetime
 import json
 import pickle
+from typing import List
 import numpy as np
+from tradingview_ta import TA_Handler, Interval
 
 def convert_currency(logp: np.array, xrate: np.array, type: str = "forward") -> np.array:
     """
@@ -88,35 +90,6 @@ def save_dict_with_timestamp(data_dict, file_prefix, dest_directory='.'):
     except Exception as e:
         print(f"Error saving dictionary on {timestamp}: {e}")
 
-def load_cache(file_prefix, source_dir='.'):
-    """
-    Load a dictionary from a file.
-
-    Parameters:
-    - file_prefix: str, the prefix for the file (without extension).
-    - source_dir: str, the source directory for the file (default is the current directory).
-
-    Returns:
-    - dict or None: The loaded dictionary or None if the file doesn't exist.
-    """
-    # Generate timestamp in YYMMDD format
-    timestamp = datetime.datetime.now().strftime('%y%m%d')
-
-    # Create a new file name with the timestamp
-    file_path = os.path.join(source_dir, f"{file_prefix}_{timestamp}.pkl")
-    
-    if os.path.exists(file_path):
-        try:
-            with open(file_path, 'rb') as file:
-                loaded_dict = pickle.load(file)
-                print(f"Using data saved to {file.name}.")
-                return loaded_dict
-        except Exception as e:
-            print(f"Error loading dictionary: {e}")
-            return {}
-    else:
-        print(f"File not found: {file_path}")
-        return {}
 
 class ProgressBar:
     """
@@ -288,4 +261,24 @@ def cleanup_directory_files(directory_path):
     except Exception as e:
         print(f"Error cleaning up files in directory '{directory_path}': {e}")
 
-
+def tradingview_recommendation(symbol, market):
+    if market == "india":
+        screener = "india"
+        exchange = "NSE"
+    else:
+        screener = "america"
+        exchange = "NYSE"
+    try:
+        symbol_handler = TA_Handler(
+            symbol=symbol,
+            screener=screener,
+            exchange=exchange,
+            interval=Interval.INTERVAL_1_WEEK,
+        )
+        analysis = symbol_handler.get_analysis()
+        summary = analysis.summary['RECOMMENDATION']
+        moving_averages = analysis.moving_averages['RECOMMENDATION']
+        oscillators = analysis.oscillators['RECOMMENDATION']
+        return [summary, moving_averages, oscillators]
+    except Exception as e:
+        return ["N_A", "N_A", "N_A"]

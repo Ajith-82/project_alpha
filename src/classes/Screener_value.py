@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-from classes.Plot_indicators import plot_strategy_multiple
+from classes.Plot_stocks import plot_strategy_multiple
 from classes.Screener_ma import add_signal_indicators
 
 PE_THRESHOLD = 15
