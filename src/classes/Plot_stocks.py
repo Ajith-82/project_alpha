@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 import os
+import math
 from token import DOUBLESLASH
 import plotly.graph_objects as go
 import plotly.express as px
@@ -242,3 +243,30 @@ def create_plot_and_email(screener: str, market: str, symbols: list, data: dict,
     os.makedirs(out_dir, exist_ok=True)
     plot_strategy_multiple(market, symbols, plot_data, out_dir)
     send_email(market, screener, out_dir)
+
+
+
+def create_plot_and_email_batched(screener: str, market: str, symbols: list, data: dict, out_dir: str, batch_size: int = 100):
+    """
+    Generate an indicator plot for the given screener, market, symbols, data, and output directory,
+    and send email with a batch of symbols.
+
+    Args:
+        screener (str): The name of the screener.
+        market (str): The market for the symbols.
+        symbols (list): List of symbols to generate indicator plots for.
+        data (dict): Dictionary containing the price data for the symbols.
+        out_dir (str): The output directory to save the generated plots.
+        batch_size (int, optional): The batch size for sending email. Defaults to 100.
+
+    Returns:
+        None
+    """
+    num_batches = math.ceil(len(symbols) / batch_size)
+    for i in range(num_batches):
+        batch_symbols = symbols[i * batch_size: (i + 1) * batch_size]
+        plot_data = {symbol: data["price_data"][symbol] for symbol in batch_symbols}
+        batch_out_dir = f"{out_dir}_batch_{i}"
+        os.makedirs(batch_out_dir, exist_ok=True)
+        plot_strategy_multiple(market, batch_symbols, plot_data, batch_out_dir)
+        send_email(market, screener, batch_out_dir)

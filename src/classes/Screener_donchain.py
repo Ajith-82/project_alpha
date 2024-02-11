@@ -37,7 +37,6 @@ def donchain_screener(data, duration=5):
 
     for ticker in tickers:
         trade_signals = generate_donchain_signals(price_data[ticker], duration)
-        print(trade_signals)
         if trade_signals.iloc[-1] == 1:
             screener_data["BUY"].append(ticker)
         elif trade_signals.iloc[-1] == -1:

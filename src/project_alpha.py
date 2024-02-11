@@ -17,7 +17,7 @@ from classes.Screener_donchain import donchain_screener
 from classes.Screener_value import screener_value
 import classes.IndexListFetcher as Index
 import classes.Tools as tools
-from classes.Plot_stocks import create_plot_and_email
+from classes.Plot_stocks import create_plot_and_email_batched
 
 
 def cli_argparser():
@@ -141,22 +141,22 @@ def main():
     create_plot_and_email("Volatile top 100", market, volatile_symbols_top, data, screener_volatile_top)
     create_plot_and_email("Volatile bottom 100", market, volatile_symbols_bottom, data, screener_volatile_bottom)
     print("\nFinished Volatility based screening...")
+    '''
 
     # Start MA screener
     ma_screener_out_dir = "data/processed_data/screener_ma"
     print("\nStarting MA based screening...")
     ma_screener_out = screener_ma(data, screener_dur)
     ma_screener_symbols =list(ma_screener_out.keys())
-    create_plot_and_email("MA screener", market, ma_screener_symbols, data, ma_screener_out_dir)
+    create_plot_and_email_batched("MA screener", market, ma_screener_symbols, data, ma_screener_out_dir)
     print("\nFinished MA based screening...")
-    '''
 
     # Start MACD screener
     macd_screener_out_dir = "data/processed_data/screener_macd"
     print("\nStarting MACD based screening...")
     macd_screener_out = macd_screener(data, screener_dur)
     macd_screener_symbols = macd_screener_out["BUY"]
-    create_plot_and_email("MACD screener", market, macd_screener_symbols, data, macd_screener_out_dir)
+    create_plot_and_email_batched("MACD screener", market, macd_screener_symbols, data, macd_screener_out_dir)
     print("\nFinished MACD based screening...")
 
     # Start Donchain screener
@@ -164,8 +164,7 @@ def main():
     print("\nStarting Donchain based screening...")
     donchain_screener_out = donchain_screener(data, screener_dur)
     donchain_screener_symbols = donchain_screener_out["BUY"]
-    print(donchain_screener_symbols)
-    create_plot_and_email("Donchain screener", market, donchain_screener_symbols, data, macd_screener_out_dir)
+    create_plot_and_email_batched("Donchain screener", market, donchain_screener_symbols, data, macd_screener_out_dir)
     print("\nFinished Donchain based screening...")
 
 if __name__ == "__main__":
