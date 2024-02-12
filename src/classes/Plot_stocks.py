@@ -167,7 +167,7 @@ def plot_strategy_multiple(market, tickers, data, out_dir, max_bars=200):
         dt_obs = [d.strftime("%Y-%m-%d") for d in pd.to_datetime(df.index)]
         # define dates with missing values
         dt_breaks = [d for d in dt_all.strftime("%Y-%m-%d").tolist() if not d in dt_obs]
-        df = df.tail(max_bars)
+        df = df.tail(max_bars).copy()
         # Construct a 4 x 1 Plotly figure
         fig = make_subplots(
             rows=4,

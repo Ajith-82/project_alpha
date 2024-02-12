@@ -15,6 +15,7 @@ from classes.Screener_ma import screener_ma
 from classes.Screener_macd import macd_screener
 from classes.Screener_donchain import donchain_screener
 from classes.Screener_value import screener_value
+from classes.Screener_breakout import breakout_screener
 import classes.IndexListFetcher as Index
 import classes.Tools as tools
 from classes.Plot_stocks import create_plot_and_email_batched
@@ -121,7 +122,7 @@ def main():
             screener_value_charts(cache, market, value_index, value_symbols)
     else:
         index, symbols = Index.sp_500()
-        screener_dur = 3
+        screener_dur = 5
 
     if not os.path.exists(f"data/historic_data/{market}"):
         os.mkdir(f"data/historic_data/{market}")
@@ -166,6 +167,15 @@ def main():
     donchain_screener_symbols = donchain_screener_out["BUY"]
     create_plot_and_email_batched("Donchain screener", market, donchain_screener_symbols, data, macd_screener_out_dir)
     print("\nFinished Donchain based screening...")
+    # Start breakout screener
+    breakout_screener_out_dir = "data/processed_data/screener_breakout"
+    print("\nStarting Breakout based screening...")
+    breakout_screener_out = breakout_screener(data, screener_dur)
+    print(breakout_screener_out)
+    breakout_screener_symbols = breakout_screener_out["BUY"]
+    create_plot_and_email_batched("Breakout screener", market, breakout_screener_symbols, data, breakout_screener_out_dir)
+    print("\nFinished Breakout based screening...")
+
 
 if __name__ == "__main__":
     main()
