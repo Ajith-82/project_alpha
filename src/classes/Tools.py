@@ -262,23 +262,49 @@ def cleanup_directory_files(directory_path):
         print(f"Error cleaning up files in directory '{directory_path}': {e}")
 
 def tradingview_recommendation(symbol, market):
+    """
+    Retrieves the tradingview recommendation for the given symbol and market.
+
+    Parameters:
+    symbol (str): The symbol for which the recommendation is being retrieved.
+    market (str): The market in which the symbol is being traded.
+
+    Returns:
+    list: A list containing the summary, moving averages, and oscillators recommendations.
+    """
     if market == "india":
         screener = "india"
         exchange = "NSE"
     else:
         screener = "america"
-        exchange = "NYSE"
+        exchanges = ["NYSE", "NASDAQ"]
+
     try:
-        symbol_handler = TA_Handler(
-            symbol=symbol,
-            screener=screener,
-            exchange=exchange,
-            interval=Interval.INTERVAL_1_WEEK,
-        )
-        analysis = symbol_handler.get_analysis()
-        summary = analysis.summary['RECOMMENDATION']
-        moving_averages = analysis.moving_averages['RECOMMENDATION']
-        oscillators = analysis.oscillators['RECOMMENDATION']
-        return [summary, moving_averages, oscillators]
+        if market == "america":
+            for exchange in exchanges:
+                symbol_handler = TA_Handler(
+                    symbol=symbol,
+                    screener=screener,
+                    exchange=exchange,
+                    interval=Interval.INTERVAL_1_WEEK,
+                )
+                analysis = symbol_handler.get_analysis()
+                summary = analysis.summary['RECOMMENDATION']
+                moving_averages = analysis.moving_averages['RECOMMENDATION']
+                oscillators = analysis.oscillators['RECOMMENDATION']
+                if summary:  # Check if a result is obtained
+                    return [summary, moving_averages, oscillators]
+        else:
+            symbol_handler = TA_Handler(
+                symbol=symbol,
+                screener=screener,
+                exchange=exchange,
+                interval=Interval.INTERVAL_1_WEEK,
+            )
+            analysis = symbol_handler.get_analysis()
+            summary = analysis.summary['RECOMMENDATION']
+            moving_averages = analysis.moving_averages['RECOMMENDATION']
+            oscillators = analysis.oscillators['RECOMMENDATION']
+            return [summary, moving_averages, oscillators]
     except Exception as e:
-        return ["N_A", "N_A", "N_A"]
+        return['N_A', 'N_A', 'N_A']

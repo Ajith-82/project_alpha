@@ -7,7 +7,6 @@ os.environ["OMP_NUM_THREADS"] = "4"
 import sys
 from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter, SUPPRESS
 import os.path
-import pickle
 
 from classes.Download import load_data, load_volatile_data
 from classes.Volatile import volatile
@@ -76,33 +75,33 @@ def cli_argparser():
 
 
 def screener_value_charts(cache, market: str, index: str, symbols: list):
-    if not os.path.exists(f"data/historic_data/{market}"):
-        os.mkdir(f"data/historic_data/{market}")
-    data_dir = f"data/historic_data/{market}"
-    file_prifix = f"{index}_data"
-    data = load_data(cache, symbols, market, file_prifix, data_dir)
+    """
+    Screener value charts for a given market, index, and list of symbols.
+
+    Args:
+        cache: The cache object for data storage.
+        market (str): The market for which the data is being processed.
+        index (str): The index for which the data is being processed.
+        symbols (list): The list of symbols for which the data is being processed.
+
+    Returns:
+        None
+    """
+    historic_data_dir = f"data/historic_data/{market}"
+    if not os.path.exists(historic_data_dir):
+        os.mkdir(historic_data_dir)
+    
+    file_prefix = f"{index}_data"
+    data = load_data(cache, symbols, market, file_prefix, historic_data_dir)
+    
     price_data = data["price_data"]
     value_symbols = data["tickers"]
-    plot_data = {}
-    for symbol in value_symbols:
-        plot_data[symbol] = add_signal_indicators(price_data[symbol])
-
-    if not os.path.exists(f"data/processed_data/{index}"):
-        os.mkdir(f"data/processed_data/{index}")
-    screener_out_dir = f"data/processed_data/{index}"
-    plot_strategy_multiple(value_symbols, plot_data, screener_out_dir)
-    send_email(market, "External screener charts", screener_out_dir)
-
-def add_indicator_plot(screener: str, market: str, symbols: list, data: dict, out_dir: str):
-    raw_data = data["price_data"]
-    plot_data = {}
-    for symbol in symbols:
-        plot_data[symbol] = add_signal_indicators(raw_data[symbol])
-
-    if not os.path.exists(out_dir):
-        os.mkdir(out_dir)
-    plot_strategy_multiple(symbols, plot_data, out_dir)
-    send_email(market, screener, out_dir)
+    
+    processed_data_dir = f"data/processed_data/{index}"
+    if not os.path.exists(processed_data_dir):
+        os.mkdir(processed_data_dir)
+    
+    create_plot_and_email_batched("IND_screener_value_stocks", market, value_symbols, price_data, processed_data_dir)
 
 
 def main():
@@ -167,11 +166,11 @@ def main():
     donchain_screener_symbols = donchain_screener_out["BUY"]
     create_plot_and_email_batched("Donchain screener", market, donchain_screener_symbols, data, macd_screener_out_dir)
     print("\nFinished Donchain based screening...")
+    
     # Start breakout screener
     breakout_screener_out_dir = "data/processed_data/screener_breakout"
     print("\nStarting Breakout based screening...")
     breakout_screener_out = breakout_screener(data, screener_dur)
-    print(breakout_screener_out)
     breakout_screener_symbols = breakout_screener_out["BUY"]
     create_plot_and_email_batched("Breakout screener", market, breakout_screener_symbols, data, breakout_screener_out_dir)
     print("\nFinished Breakout based screening...")

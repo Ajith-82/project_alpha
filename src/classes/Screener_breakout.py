@@ -1,54 +1,45 @@
-import pandas as pd
-import yfinance as yf
-import pandas_ta as ta
 import numpy as np
 
-def get_candle_type(dailyData):
-    return bool(dailyData['Close'].iloc[0] >= dailyData['Open'].iloc[0])
+def breakouts_screener(stock_data, min_ave_volume):
+    '''
+    A function that accepts stocks price and returns True if at least one breakout candle in the past 5 days
 
-# Find accurate breakout value
-def generate_breakout_signals(data, days_to_lookback):
-    """
-    Generate breakout signals based on the input data and the specified number of days to look back.
-    Parameters:
-    - data: the input data for generating breakout signals
-    - days_to_lookback: the number of days to look back for breakout signals
+    Args:
+        stock_data (pd.DataFrame): A dataframe containing stock data
+        min_ave_volume (int): The minimum average volume
+
     Returns:
-    - True if a breakout signal is detected, False otherwise
-    """
-    data = data.fillna(0).replace([np.inf, -np.inf], 0)
-    recent = data.tail(1)
-    high = round(data['High'].max(), 2)
-    close = round(data['Close'].max(), 2)
-    recent_close = round(recent['Close'].iloc[0], 2)
-    
-    if np.isnan(close) or np.isnan(high):
-        #save_dict['Breaking-Out'] = 'BO: Unknown'
-        return False
-    
-    if high > close:
-        if (high - close) <= (high * 2 / 100):
-            #save_dict['Breaking-Out'] = str(close)
-            if recent_close >= close:
-                return True and get_candle_type(recent)
+        bool: True if at least one breakout candle in the past 5 days, False otherwise        
+    '''
+
+    try:
+        latest_25_candles = stock_data.tail(25).copy()
+        latest_25_candles = latest_25_candles.drop(['Adj Close', 'Dividends', 'Stock Splits', 'SMA_10', 'SMA_30', 'SMA_50', 'SMA_200', 'MACD', 'MACD_signal', 'MACD_hist', 'RSI'], axis=1)
+
+        if latest_25_candles.empty:
+            return False
+
+        latest_25_candles['SellingPressure'] = latest_25_candles['High'] - latest_25_candles['Close']
+        latest_25_candles['O_to_C'] = latest_25_candles['Close'] - latest_25_candles['Open']
+        latest_25_candles['OC_20D_Mean'] = latest_25_candles['O_to_C'].rolling(20).mean()
+        latest_25_candles['OC_perc_from_20D_Mean'] = 100*(latest_25_candles['O_to_C'] - latest_25_candles['OC_20D_Mean'])/latest_25_candles['OC_20D_Mean']
+        latest_25_candles['MaxOC_Prev10'] = latest_25_candles['O_to_C'].rolling(10).max()
+        latest_25_candles['Volume_20D_Mean'] = latest_25_candles['Volume'].rolling(20).mean()
+        latest_25_candles['Volume_perc_from_20D_Mean'] = 100*(latest_25_candles['Volume'] - latest_25_candles['Volume_20D_Mean'])/latest_25_candles['Volume_20D_Mean']
+
+        latest_5_candles = latest_25_candles.tail(5)
+        condition = (latest_5_candles['O_to_C'] >= 0.0) & (latest_5_candles['O_to_C'] == latest_5_candles['MaxOC_Prev10']) & (latest_5_candles['SellingPressure']/latest_5_candles['O_to_C'] <= 0.40) & (latest_5_candles['OC_perc_from_20D_Mean'] >= 100.0) & (latest_5_candles['Volume_perc_from_20D_Mean'] >= 50.0)
+        breakouts = latest_5_candles[condition].reset_index(drop=True)
+
+        ave_volume = latest_5_candles['Volume'].mean()
+
+        if ave_volume >= min_ave_volume and not breakouts.empty:
+            return True
+        else:
             return False
         
-        no_of_higher_shadows = len(data[data['High'] > close])
-        if days_to_lookback / no_of_higher_shadows <= 3:
-            #save_dict['Breaking-Out'] = str(high)
-            if recent_close >= high:
-                return True and get_candle_type(recent)
-            return False
-        
-        #save_dict['Breaking-Out'] = str(close) + ", " + str(high)
-        if recent_close >= close:
-            return True and get_candle_type(recent)
-        return False
-    else:
-        #save_dict['Breaking-Out'] = str(close)
-        if recent_close >= close:
-            return True and get_candle_type(recent)
-        return False
+    except Exception as e:
+        return f"An error occurred while screening for breakout stocks: {e}"
 
 
 def breakout_screener(data, duration=5):
@@ -68,7 +59,7 @@ def breakout_screener(data, duration=5):
     screener_data = {"BUY": [], "SELL": []}
 
     for ticker in tickers:
-        breakout_signals = generate_breakout_signals(price_data[ticker], duration)
+        breakout_signals = breakouts_screener(price_data[ticker], min_ave_volume=100000)
         if breakout_signals:
             screener_data["BUY"].append(ticker)
         else:
