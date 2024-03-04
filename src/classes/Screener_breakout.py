@@ -42,7 +42,7 @@ def breakouts_screener(stock_data, min_ave_volume):
         return f"An error occurred while screening for breakout stocks: {e}"
 
 
-def breakout_screener(data, duration=5):
+def breakout_screener(data, tickers):
     '''
     Generate a breakout screener for a given set of stocks based on various signal indicators.
     
@@ -54,7 +54,7 @@ def breakout_screener(data, duration=5):
         dict: A dictionary containing the matching trades for each stock based on the specified conditions in the last `duration` days.
     '''
 
-    tickers = data["tickers"]
+    #tickers = data["tickers"]
     price_data = data["price_data"]
     screener_data = {"BUY": [], "SELL": []}
 

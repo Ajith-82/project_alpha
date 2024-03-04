@@ -18,6 +18,7 @@ from classes.Screener_breakout import breakout_screener
 import classes.IndexListFetcher as Index
 import classes.Tools as tools
 from classes.Plot_stocks import create_plot_and_email_batched
+from classes.Screener_trendline import trendline_screener
 
 
 def cli_argparser():
@@ -115,7 +116,7 @@ def main():
     # Load data
     if market == "india":
         index, symbols = Index.nse_500()
-        screener_dur = 3
+        screener_dur = 5
         if args.value:
             value_index, value_symbols = Index.ind_screener_value_stocks()
             screener_value_charts(cache, market, value_index, value_symbols)
@@ -130,19 +131,18 @@ def main():
     data = load_data(cache, symbols, market, file_prifix, data_dir)
 
     # Start processing data
-    '''
     screener_volatile_top = "data/processed_data/volatile_top"
     screener_volatile_bottom = "data/processed_data/volatile_bottom"
     print("\nStarting Volatility based screening...")
     volatile_data = load_volatile_data(market, data)
     volatile_df = volatile(args, volatile_data)
     volatile_symbols_top = volatile_df["SYMBOL"].head(100).tolist()
-    volatile_symbols_bottom = volatile_df["SYMBOL"].tail(100).tolist()
-    create_plot_and_email("Volatile top 100", market, volatile_symbols_top, data, screener_volatile_top)
-    create_plot_and_email("Volatile bottom 100", market, volatile_symbols_bottom, data, screener_volatile_bottom)
+    volatile_symbols_bottom = volatile_df["SYMBOL"].tail(200).tolist()
+    #create_plot_and_email_batched("Volatile top 100", market, volatile_symbols_top, data, screener_volatile_top)
+    #create_plot_and_email_batched("Volatile bottom 100", market, volatile_symbols_bottom, data, screener_volatile_bottom)
     print("\nFinished Volatility based screening...")
-    '''
 
+    '''
     # Start MA screener
     ma_screener_out_dir = "data/processed_data/screener_ma"
     print("\nStarting MA based screening...")
@@ -167,14 +167,21 @@ def main():
     create_plot_and_email_batched("Donchain screener", market, donchain_screener_symbols, data, macd_screener_out_dir)
     print("\nFinished Donchain based screening...")
     
+    '''
     # Start breakout screener
     breakout_screener_out_dir = "data/processed_data/screener_breakout"
     print("\nStarting Breakout based screening...")
-    breakout_screener_out = breakout_screener(data, screener_dur)
+    breakout_screener_out = breakout_screener(data, volatile_symbols_bottom)
     breakout_screener_symbols = breakout_screener_out["BUY"]
     create_plot_and_email_batched("Breakout screener", market, breakout_screener_symbols, data, breakout_screener_out_dir)
     print("\nFinished Breakout based screening...")
-
+    # Start trend screener
+    trend_screener_out_dir = "data/processed_data/screener_trend"
+    print("\nStarting trend based screening...")
+    trend_screener_out = trendline_screener(data, volatile_symbols_top, screener_dur)
+    trend_screener_out_symbols = [ticker for ticker, _ in trend_screener_out['Trend']]
+    create_plot_and_email_batched("Trend screener", market, trend_screener_out_symbols, data, trend_screener_out_dir)
+    print("\nFinished trend based screening...")
 
 if __name__ == "__main__":
     main()
