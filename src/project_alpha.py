@@ -116,13 +116,13 @@ def main():
     # Load data
     if market == "india":
         index, symbols = Index.nse_500()
-        screener_dur = 5
+        screener_dur = 3
         if args.value:
             value_index, value_symbols = Index.ind_screener_value_stocks()
             screener_value_charts(cache, market, value_index, value_symbols)
     else:
         index, symbols = Index.sp_500()
-        screener_dur = 5
+        screener_dur = 3
 
     if not os.path.exists(f"data/historic_data/{market}"):
         os.mkdir(f"data/historic_data/{market}")
