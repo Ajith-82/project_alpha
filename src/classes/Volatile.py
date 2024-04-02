@@ -166,6 +166,17 @@ def estimate_matches(tickers: list, mu: np.array, tt: np.array) -> dict:
 
 
 def estimate_clusters(tickers: list, mu: np.array, tt: np.array):
+    """
+    A function to estimate clusters based on given parameters.
+
+    Parameters:
+    tickers (list): A list of tickers.
+    mu (np.array): An array representing mu.
+    tt (np.array): An array representing tt.
+
+    Returns:
+    list: A list of indices representing clusters for each stock.
+    """
     dtt = np.arange(1, tt.shape[0])[:, None] * tt[1:] / tt[1, None]
     dlogp_est = np.dot(mu[:, 1:], dtt)
     num_stocks = len(tickers)
@@ -192,6 +203,17 @@ def estimate_clusters(tickers: list, mu: np.array, tt: np.array):
         return clusters
 
     def _estimate_one(i, dlogp_est):
+        """
+        Estimate one cluster based on the given index and estimated log probabilities.
+
+        Parameters:
+            i (int): The index of the element to estimate the cluster for.
+            dlogp_est (numpy.ndarray): The estimated log probabilities.
+
+        Returns:
+            list: The updated clusters after estimating the new cluster.
+
+        """
         dist = np.sum((dlogp_est[i] - dlogp_est) ** 2, 1)
         clusters.append(set(np.argsort(dist)[:2].tolist()))
         return _unite_clusters(clusters)
@@ -206,6 +228,12 @@ def estimate_clusters(tickers: list, mu: np.array, tt: np.array):
 
 
 def cli_argparser():
+    """
+    A function to create and parse command line arguments for the Volatile trading companion.
+
+    Returns:
+        argparse.Namespace: The parsed command-line arguments.
+    """
     cli = ArgumentParser(
         "Volatile: your day-to-day trading companion.",
         formatter_class=ArgumentDefaultsHelpFormatter,
@@ -250,6 +278,20 @@ def cli_argparser():
 
 
 def load_data(cache, symbols: list, market: str):
+    """
+    Loads data from cache or downloads it if cache is not available.
+
+    Parameters:
+        cache (bool): Whether to load data from cache.
+        symbols (list): List of symbols to download data for. If None, reads symbols from "symbols_list.txt".
+        market (str): Market to download data from.
+
+    Returns:
+        dict: The loaded data.
+
+    Raises:
+        FileNotFoundError: If cache is enabled and "data.pickle" does not exist.
+    """
     if cache and os.path.exists("data.pickle"):
         print("\nLoading last year of data...")
         with open("data.pickle", "rb") as handle:
@@ -273,6 +315,16 @@ def volatile(
     args,
     data,
 ):
+    """
+    Generate a prediction table based on the given data and arguments.
+
+    Parameters:
+    - args: Arguments for controlling the function behavior.
+    - data: Dictionary containing various data including tickers, prices, currencies, exchange rates, sectors, and industries.
+
+    Returns:
+    - volatile_df: DataFrame containing the prediction table with information such as symbol, sector, industry, price, rate, growth, volatility, and match.
+    """
     tickers = data["tickers"]
     logp = np.log(data["price"])
 
@@ -417,8 +469,6 @@ def volatile(
         plot_stock_estimates(data, p_est, std_p_est, args.rank, rank, ranked_rates)
         if num_stocks > 1:
             plot_matches(data, matches)
-
-    print("\nPREDICTION TABLE")
     ranked_sectors = [
         name if name[:2] != "NA" else "Not Available"
         for name in np.array(list(data["sectors"].values()))[rank]
@@ -428,6 +478,8 @@ def volatile(
         for name in np.array(list(data["industries"].values()))[rank]
     ]
 
+    '''
+    print("\nPREDICTION TABLE")
     strf = "{:<15} {:<26} {:<42} {:<16} {:<22} {:<11} {:<15} {:<4}"
     num_dashes = 159
     separator = num_dashes * "-"
@@ -469,7 +521,7 @@ def volatile(
         print(separator)
         if i < num_stocks - 1 and ranked_rates[i] != ranked_rates[i + 1]:
             print(separator)
-
+    '''
     if args.save_table:
         tab_name = "data/processed_data/volatile/prediction_table.csv"
 

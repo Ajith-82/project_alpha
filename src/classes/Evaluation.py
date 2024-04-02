@@ -38,7 +38,10 @@ def negative_loglikelihood(model: tfd.JointDistributionSequentialAutoBatched, pa
     """
     return -model.log_prob_parts(list(params) + [logp])[-1].numpy()
 
-if __name__ == '__main__':
+def main():
+    """
+    Generate a main function to perform various stock model evaluations and print the results.
+    """
     cli = ArgumentParser('Volatile: your day-to-day trading companion.',
                          formatter_class=ArgumentDefaultsHelpFormatter)
     cli.add_argument('-s', '--symbols', type=str, nargs='+', help=SUPPRESS)
@@ -135,3 +138,6 @@ if __name__ == '__main__':
 
     print('Second moment loss: ', sm_loss)
     print('Negative log-likelihood: ', nllkd)
+
+if __name__ == '__main__':
+    main()
