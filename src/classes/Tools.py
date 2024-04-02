@@ -274,7 +274,7 @@ def tradingview_recommendation(symbol, market):
     list: A list containing the summary, moving averages, and oscillators recommendations.
     """
     screener = "india" if market == "india" else "america"
-    exchange = "NSE" if market == "india" else "NYSE"
+    exchange = "NSE" if market == "india" else "NASDAQ"
 
     try:
         handler = TA_Handler(
