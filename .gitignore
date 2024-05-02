@@ -1,4 +1,4 @@
-myvenv/
+myenv/
 build/
 dist/
 test/*.ini
