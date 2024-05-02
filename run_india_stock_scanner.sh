@@ -7,7 +7,7 @@ set cwd = `pwd`
 TIMESTAMP=$(date +"%Y-%m-%d %H:%M:%S")
 
 # Define the path to your Python virtual environment
-VIRTUALENV_PATH="/data/release/project_alpha/myvenv"
+VIRTUALENV_PATH="/data/release/project_alpha/myenv"
 
 # Activate the virtual environment
 source "$VIRTUALENV_PATH/bin/activate"
