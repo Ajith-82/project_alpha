@@ -133,48 +133,57 @@ class EmailServer:
                 logging.error(f"Error sending email with CSV and images to {recipient}: {e}")
 
 
-    def send_csv_and_images(self, subject, message, folder_path=None, recipient_list=None, mock=True):
-        if recipient_list is None:
-            recipient_list = self.recipient_list
+    def send_image_attachment(
+        self,
+        subject: str,
+        message: str,
+        image_file_path: str = None,
+        recipients: list = None,
+        mock: bool = True
+    ) -> None:
+        """
+        Sends an email with an image attachment.
 
-        for recipient in recipient_list:
+        Args:
+            subject (str): The subject of the email.
+            message (str): The message body of the email.
+            image_file_path (Optional[str]): The path to the image file.
+            recipients (Optional[List[str]]): The list of recipient email addresses.
+            mock (bool): Whether to send a mock email or not.
+
+        Returns:
+            None
+
+        Raises:
+            Exception: If an error occurs while sending the email.
+        """
+        recipients = recipients or self.recipient_list
+
+        for recipient in recipients:
             try:
-                # Email content setup
-                msg = MIMEMultipart()
-                msg['Subject'] = subject
-                msg['From'] = self.smtp_user
-                msg['To'] = recipient
-                msg.add_header('Content-Type', 'text/html')
-                msg.attach(MIMEText(message, 'html'))
+                email = MIMEMultipart()
+                email['Subject'] = subject
+                email['From'] = self.smtp_user
+                email['To'] = recipient
+                email.add_header('Content-Type', 'text/html')
+                email.attach(MIMEText(message, 'html'))
 
-                # Embed CSV and PNG images from the folder
-                if folder_path:
-                    for filename in os.listdir(folder_path):
-                        # Attach CSV file
-                        if filename.lower().endswith('.csv'):
-                            csv_path = os.path.join(folder_path, filename)
-                            with StringIO() as text_stream:
-                                read_csv(text_stream)
-                                msg.attach(MIMEApplication(text_stream.getvalue(), Name=csv_path))
-                            
-                        # Attach PNG file
-                        if filename.lower().endswith('.png'):
-                            image_path = os.path.join(folder_path, filename)
-                            with open(image_path, 'rb') as image_file:
-                                msg_image = MIMEImage(image_file.read(), name=os.path.basename(image_path))
-                                msg.attach(msg_image)
+                if image_file_path:
+                    with open(image_file_path, 'rb') as image_file:
+                        image = MIMEImage(image_file.read(), name=os.path.basename(image_file_path))
+                        email.attach(image)
 
                 if mock:
                     logging.info(f'Mock: Sent to {recipient}')
                 else:
-                    self.server.sendmail(msg['From'], msg['To'], msg.as_string().encode('utf-8'))
+                    self.server.sendmail(email['From'], email['To'], email.as_string().encode('utf-8'))
                     logging.info(f"Email with attachment sent successfully to {recipient}")
             except Exception as e:
-                logging.error(f"Error sending email with CSV and images to {recipient}: {e}")
+                logging.error(f"Error sending email with image attachment to {recipient}: {e}")
 
 # Customized email functions
 def send_email(market: str, analysis: str, out_dir: str):
-    # Send email with screener_ma reports
+    # Send email with reports
     timestamp = dt.datetime.now().strftime("%d-%m-%y")
     email_server = EmailServer("email_config.json")
     email_subject = f"{analysis} for {market} on {timestamp}"
@@ -186,15 +195,25 @@ def send_email(market: str, analysis: str, out_dir: str):
         mock=False,
     )
 
-def send_email_volatile(market: str, analysis: str, out_dir: str):
-    # Send email with screener_ma reports
-    timestamp = dt.datetime.now().strftime("%d-%m-%y")
-    email_server = EmailServer("email_config.json")
-    email_subject = f"{analysis} for {market} on {timestamp}"
-    email_message = f"{analysis} for {market} on {timestamp}"
-    email_server.send_csv_and_images(
-        email_subject,
-        email_message,
-        folder_path=out_dir,
-        mock=False,
-    )
+def send_email_volatile(market: str, out_dir: str):
+    # Check and select volatile output files
+    files = os.listdir(out_dir)
+    # Select all png files
+    png_files = [f for f in files if f.endswith('.png')]
+    # Select each file and send an email
+    for file in png_files:
+        # Set analysis name from file name
+        analysis = file.split('.')[0]
+        #print("Sending email for Volatile", analysis)
+        # Send email with volatile reports
+        timestamp = dt.datetime.now().strftime("%d-%m-%y")
+        email_server = EmailServer("email_config.json")
+        email_subject = f"Volatile {analysis} for {market} on {timestamp}"
+        email_message = f"Volatile {analysis} for {market} on {timestamp}"
+        file_path=os.path.join(out_dir, file)
+        email_server.send_image_attachment(
+            email_subject,
+            email_message,
+            image_file_path=file_path,
+            mock=False,
+        )

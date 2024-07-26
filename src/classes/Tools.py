@@ -7,6 +7,7 @@ import pickle
 from typing import List
 import numpy as np
 from tradingview_ta import TA_Handler, Interval
+import csv
 
 def convert_currency(logp: np.array, xrate: np.array, type: str = "forward") -> np.array:
     """
@@ -311,3 +312,18 @@ class SuppressOutput:
             sys.stdout = self._stdout 
         if self.suppress_stderr: 
             sys.stderr = self._stderr
+
+def save_scrrener_results_to_csv(market_name, screener_name, results):
+    filename = 'data/historic_results/' + market_name + '/' + screener_name + '.csv'
+    # Create the directory if it doesn't exist
+    dirname = os.path.dirname(filename)
+    os.makedirs(dirname, exist_ok=True)
+
+    # Open the file in append mode
+    with open(filename, 'a', newline='') as csvfile:
+        writer = csv.writer(csvfile)
+
+        # Write the results in a row in the following format: Date : Results.
+        current_datetime = datetime.datetime.now().strftime("%d-%m-%Y %H:%M:%S")
+        row = [current_datetime] + results
+        writer.writerow(row)

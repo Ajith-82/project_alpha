@@ -205,7 +205,7 @@ def download_stock_data(
         price_data = price_data.loc[~price_data.index.duplicated(keep="first")]
         price_data = price_data.ffill().bfill().drop_duplicates()
         price_data = add_indicators(price_data)
-        price_data.fillna(0, inplace=True)
+        price_data = price_data.fillna(0)
 
         # Get additional stock information using yahooquery
         company_info = ticker_obj.info
