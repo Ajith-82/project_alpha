@@ -21,7 +21,7 @@ LOG_FILE="./logs/project_alpha_us.log"
 {
   echo "Script started at: $TIMESTAMP"
   echo "------------------"
-  python ./src/project_alpha.py --no-plots
+  python ./src/project_alpha.py
   echo "------------------"
   echo "Script finished at: $(date +'%Y-%m-%d %H:%M:%S')"
 } >> "$LOG_FILE" 2>&1

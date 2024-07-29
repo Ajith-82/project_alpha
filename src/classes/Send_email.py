@@ -208,8 +208,8 @@ def send_email_volatile(market: str, out_dir: str):
         # Send email with volatile reports
         timestamp = dt.datetime.now().strftime("%d-%m-%y")
         email_server = EmailServer("email_config.json")
-        email_subject = f"Volatile {analysis} for {market} on {timestamp}"
-        email_message = f"Volatile {analysis} for {market} on {timestamp}"
+        email_subject = f"{analysis} for {market} on {timestamp}"
+        email_message = f"Today's {analysis} for {market}"
         file_path=os.path.join(out_dir, file)
         email_server.send_image_attachment(
             email_subject,
