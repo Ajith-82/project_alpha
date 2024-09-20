@@ -26,12 +26,14 @@ class EmailServer:
         self.smtp_port = email_credentials.get('smtp_port')
         self.smtp_user = email_credentials.get('smtp_user')
         self.smtp_password = email_credentials.get('smtp_password')
+        self.sender_id = email_credentials.get('sender_id')
 
         # Recipient list
         self.recipient_list = config.get('recipient_list', [])
 
         # Set up SMTP connection
         self.server = smtplib.SMTP(self.smtp_host, self.smtp_port)
+        self.server.ehlo()
         self.server.starttls()
         self.server.login(self.smtp_user, self.smtp_password)
 
@@ -49,7 +51,7 @@ class EmailServer:
                 # Email content setup
                 msg = MIMEMultipart()
                 msg['Subject'] = subject
-                msg['From'] = self.smtp_user
+                msg['From'] = self.sender_id
                 msg['To'] = recipient
                 msg.add_header('Content-Type', 'text/html')
                 msg.attach(MIMEText(message, 'html'))
@@ -82,7 +84,7 @@ class EmailServer:
                 # Email content setup
                 msg = MIMEMultipart()
                 msg['Subject'] = subject
-                msg['From'] = self.smtp_user
+                msg['From'] = self.sender_id
                 msg['To'] = recipient
                 msg.add_header('Content-Type', 'text/html')
                 msg.attach(MIMEText(message, 'html'))
@@ -109,7 +111,7 @@ class EmailServer:
                 # email content set up
                 msg = EmailMessage()
                 msg['Subject'] = subject
-                msg['From'] = self.smtp_user
+                msg['From'] = self.sender_id
                 msg['To'] = recipient
                 msg.add_header('Content-Type', 'text/html')
                 msg.set_content(message, subtype='html')
@@ -163,7 +165,7 @@ class EmailServer:
             try:
                 email = MIMEMultipart()
                 email['Subject'] = subject
-                email['From'] = self.smtp_user
+                email['From'] = self.sender_id
                 email['To'] = recipient
                 email.add_header('Content-Type', 'text/html')
                 email.attach(MIMEText(message, 'html'))
