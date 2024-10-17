@@ -138,7 +138,7 @@ def main():
     volatile_df = volatile(args, volatile_data)
     volatile_symbols_top = volatile_df["SYMBOL"].head(200).tolist()
     volatile_symbols_bottom = volatile_df["SYMBOL"].tail(200).tolist()
-    send_email_volatile(market, "data/processed_data/volatile")
+    #send_email_volatile(market, "data/processed_data/volatile")
     print("\nFinished Volatility based screening...")
 
     '''
@@ -173,15 +173,20 @@ def main():
     breakout_screener_out = breakout_screener(data, volatile_symbols_bottom)
     breakout_screener_out_symbols = breakout_screener_out["BUY"]
     create_plot_and_email_batched("Breakout screener", market, breakout_screener_out_symbols, data, breakout_screener_out_dir)
-    tools.save_scrrener_results_to_csv(market, "screener_breakout", breakout_screener_out_symbols)
+    tools.save_screener_results_to_csv(market, "screener_breakout", breakout_screener_out_symbols)
     print("\nFinished Breakout based screening...")
+    
     # Start trend screener
     trend_screener_out_dir = "data/processed_data/screener_trend"
+    trend_screener_history = "data/processed_data/screener_trend_history"
     print("\nStarting trend based screening...")
     trend_screener_out = trendline_screener(data, volatile_symbols_top, screener_dur)
     trend_screener_out_symbols = [ticker for ticker, _ in trend_screener_out['Trend']]
     create_plot_and_email_batched("Trend screener", market, trend_screener_out_symbols, data, trend_screener_out_dir)
-    tools.save_scrrener_results_to_csv(market, "screener_trend", trend_screener_out_symbols)
+    trend_history_file = tools.save_screener_results_to_csv(market, "screener_trend", trend_screener_out_symbols)
+    trend_common = tools.find_common_symbols(trend_history_file, 5)
+    if len(trend_common) > 0:
+        create_plot_and_email_batched("Trending stocks in last 5 days", market, trend_common, data, trend_screener_history)
     print("\nFinished trend based screening...")
 
 if __name__ == "__main__":

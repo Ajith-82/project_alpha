@@ -45,18 +45,18 @@ def find_trend(data, lookback_days=5):
         return 'Unknown'
     elif -30 <= angle <= 30:
         return 'Sideways'
-    elif 30 < angle < 61:
+    elif 30 < angle < 60:
         return 'Weak Up'
     elif angle >= 60:
         return 'Strong Up'
-    elif -61 < angle <= -30:
+    elif -60 < angle < -30:
         return 'Weak Down'
     elif angle <= -60:
         return 'Strong Down'
 
 def trendline_screener(data, tickers, duration=5):
     '''
-    Generate a MACD screener for a given set of stocks based on various signal indicators.
+    Generate a screener for a given set of stocks based on various signal indicators.
     
     Args:
         data (dict): A dictionary containing "tickers" and "price_data".

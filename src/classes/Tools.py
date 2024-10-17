@@ -8,6 +8,7 @@ from typing import List
 import numpy as np
 from tradingview_ta import TA_Handler, Interval
 import csv
+import pandas as pd
 
 def convert_currency(logp: np.array, xrate: np.array, type: str = "forward") -> np.array:
     """
@@ -313,7 +314,7 @@ class SuppressOutput:
         if self.suppress_stderr: 
             sys.stderr = self._stderr
 
-def save_scrrener_results_to_csv(market_name, screener_name, results):
+def save_screener_results_to_csv(market_name, screener_name, results):
     filename = 'data/historic_results/' + market_name + '/' + screener_name + '.csv'
     # Create the directory if it doesn't exist
     dirname = os.path.dirname(filename)
@@ -327,3 +328,33 @@ def save_scrrener_results_to_csv(market_name, screener_name, results):
         current_datetime = datetime.datetime.now().strftime("%d-%m-%Y %H:%M:%S")
         row = [current_datetime] + results
         writer.writerow(row)
+    return filename
+
+def find_common_symbols(csv_file, n):
+    # Check if the file exists
+    if not os.path.exists(csv_file):
+        raise FileNotFoundError(f"The file '{csv_file}' does not exist")
+    # List to hold rows of data
+    rows = []
+    
+    # Read the CSV manually using the csv.reader() to handle variable-length rows
+    with open(csv_file, 'r') as file:
+        reader = csv.reader(file)
+        for row in reader:
+            rows.append(row)
+
+    # Read the CSV file, with no specific number of columns
+    df = pd.DataFrame(rows)
+    
+    # Select the last n lines
+    last_n_lines = df.tail(n)
+    
+    # Initialize the set of common symbols (start with symbols from the first row)
+    common_symbols = set(last_n_lines.iloc[0, 1:].dropna())  # Ignore the first column (Date/Time) and NaN values
+    
+    # Iterate over the remaining rows to find common symbols
+    for i in range(1, len(last_n_lines)):
+        symbols = set(last_n_lines.iloc[i, 1:].dropna())  # Get symbols from the row (ignore date, drop NaNs)
+        common_symbols.intersection_update(symbols)  # Find intersection with the current set
+    # Return common symbols list
+    return list(common_symbols)
