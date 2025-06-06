@@ -40,6 +40,7 @@ def backtest_signals(row):
 
     trades = []
     holding_period = 14
+    trade_in_progress = False
 
     if trade_in_progress:
         _data = trades[-1]
@@ -73,7 +74,7 @@ def backtest_signals(row):
                     "stock": row["stock"],
                 }
             )
-
+    return trades
 
 def find_stocks_meeting_conditions(data, signals, lookback_days):
     matching_stocks = []
