@@ -69,6 +69,11 @@ def cli_argparser():
         help="Use cached data and parameters if available.",
     )
     cli.add_argument(
+        "--db-path",
+        type=str,
+        help="Path to SQLite database for storing price data.",
+    )
+    cli.add_argument(
         "--value",
         action="store_true",
         help="Plot and send value stocks from external source.",
@@ -77,7 +82,7 @@ def cli_argparser():
 
 
 
-def screener_value_charts(cache, market: str, index: str, symbols: list):
+def screener_value_charts(cache, market: str, index: str, symbols: list, db_path: str = None):
     """
     Screener value charts for a given market, index, and list of symbols.
 
@@ -95,7 +100,7 @@ def screener_value_charts(cache, market: str, index: str, symbols: list):
         os.mkdir(historic_data_dir)
     
     file_prefix = f"{index}_data"
-    data = load_data(cache, symbols, market, file_prefix, historic_data_dir)
+    data = load_data(cache, symbols, market, file_prefix, historic_data_dir, db_path=db_path)
     
     price_data = data["price_data"]
     value_symbols = data["tickers"]
@@ -114,6 +119,7 @@ def main():
     args = cli_argparser()
     cache = args.cache
     market = args.market
+    db_path = args.db_path
 
     # Load data
     if market == "india":
@@ -121,7 +127,7 @@ def main():
         screener_dur = 3
         if args.value:
             value_index, value_symbols = Index.ind_screener_value_stocks()
-            screener_value_charts(cache, market, value_index, value_symbols)
+            screener_value_charts(cache, market, value_index, value_symbols, db_path)
     else:
         index, symbols = Index.sp_500()
         screener_dur = 3
@@ -130,7 +136,7 @@ def main():
         os.mkdir(f"data/historic_data/{market}")
     data_dir = f"data/historic_data/{market}"
     file_prifix = f"{index}_data"
-    data = load_data(cache, symbols, market, file_prifix, data_dir)
+    data = load_data(cache, symbols, market, file_prifix, data_dir, db_path=db_path)
 
     # Start processing data
     print("\nStarting Volatility based screening...")
