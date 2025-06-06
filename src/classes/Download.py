@@ -12,8 +12,16 @@ import pandas as pd
 import yfinance as yf
 from typing import Union
 from classes.Add_indicators import add_indicators
+from classes.DatabaseManager import (
+    connect_db,
+    create_tables,
+    get_last_date,
+    insert_price_rows,
+    insert_company_info,
+    get_price_dataframe,
+    get_company_info,
+)
 from classes.Tools import ProgressBar, save_dict_with_timestamp
-from classes.Add_indicators import add_indicators
 
 
 def _handle_start_end_dates(start, end):
@@ -65,6 +73,7 @@ def download(
     start: Union[str, int] = None,
     end: Union[str, int] = None,
     interval: str = "1d",
+    db_path: str = None,
 ) -> Dict[str, Union[List[str], Dict[str, pd.DataFrame], Dict[str, str]]]:
     """
     Download historical data for tickers in the list.
@@ -108,6 +117,7 @@ def download(
         start: str,
         end: str,
         interval: str = "1d",
+        db_path: str = None,
     ):
         """
         Download historical data for a single ticker with multithreading.
@@ -124,7 +134,9 @@ def download(
         end: str
             End download data at this date.
         """
-        ticker_data = download_stock_data(market, ticker, start, end, interval)
+        ticker_data = download_stock_data(
+            market, ticker, start, end, interval, db_path=db_path
+        )
         data = ticker_data["price_data"]
         info = ticker_data["company_info"]
 
@@ -141,7 +153,7 @@ def download(
     progress = ProgressBar(len(tickers), "completed")
 
     for ticker in tickers:
-        download_one_threaded(market, ticker, start, end, interval)
+        download_one_threaded(market, ticker, start, end, interval, db_path)
     multitasking.wait_for_tasks()
 
     progress.completed()
@@ -157,7 +169,12 @@ def download(
 
 
 def download_stock_data(
-    market: str, ticker: str, start_date: str, end_date: str, interval: str = "1d"
+    market: str,
+    ticker: str,
+    start_date: str,
+    end_date: str,
+    interval: str = "1d",
+    db_path: str = None,
 ) -> dict:
     """
     Download historical price and ticker info data for a single stock.
@@ -172,6 +189,20 @@ def download_stock_data(
     Returns:
     - data (dict): A dictionary containing historical price data and stock information.
     """
+
+    conn = None
+    if db_path:
+        conn = connect_db(db_path)
+        create_tables(conn)
+        last = get_last_date(conn, ticker)
+        if last:
+            nd = (pd.to_datetime(last) + timedelta(days=1)).strftime("%Y-%m-%d")
+            if start_date is None or pd.to_datetime(nd) > pd.to_datetime(start_date):
+                start_date = nd
+            if pd.to_datetime(start_date) > pd.to_datetime(end_date):
+                info = get_company_info(conn, ticker)
+                conn.close()
+                return {"price_data": pd.DataFrame(), "company_info": info}
 
     # If the market is India, append ".NS" to the ticker symbol
     if market == "india":
@@ -209,6 +240,10 @@ def download_stock_data(
 
         # Get additional stock information using yahooquery
         company_info = ticker_obj.info
+        if conn:
+            insert_price_rows(conn, ticker, price_data)
+            insert_company_info(conn, ticker, company_info)
+            conn.close()
     except Exception as e:
         print(f"Error in data download for {ticker}: {e}")
         return {"price_data": None, "company_info": None}
@@ -223,6 +258,7 @@ def load_data(
     market: str = "",
     file_prefix: str = "",
     data_dir: str = "",
+    db_path: str = None,
 ) -> dict:
     """
     Load historical data from cache or download it if not available.
@@ -255,7 +291,16 @@ def load_data(
             sys.exit()
 
     print("\nDownloading historical data...")
-    data = download(market, symbols)
+    data = download(market, symbols, db_path=db_path)
+    if db_path:
+        conn = connect_db(db_path)
+        price_data = {}
+        for sym in symbols:
+            df = get_price_dataframe(conn, sym)
+            if not df.empty:
+                price_data[sym] = df
+        data["price_data"] = price_data
+        conn.close()
     save_dict_with_timestamp(data, file_prefix, data_dir)
 
     return data
