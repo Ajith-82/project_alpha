@@ -16,7 +16,7 @@ def get_value_screener_data(statistics, balance_sheet, income_statement):
     try:
         capital_employed = balance_sheet.loc['Total Assets'] - balance_sheet.loc['Total Debt']
         roce = (income_statement.loc['Net Income'] / capital_employed).tolist()
-        # calcullate average of list of roce
+        # calculate average of list of roce
         aroce = sum(roce) / len(roce)
         ticker_data["AROCE"] = aroce
     except Exception as e:
