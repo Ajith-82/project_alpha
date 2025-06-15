@@ -44,7 +44,7 @@ def plot_market_estimates(data: dict, est: np.array, std: np.array):
     plt.legend(ll, labels, loc="upper left")
 
     if not os.path.exists('data/processed_data/volatile'):
-        os.mkdir('data/processed_data/volatile')
+        os.makedirs('data/processed_data/volatile', exist_ok=True)
     fig_name = 'data/processed_data/volatile/market_estimation.png'
     fig.savefig(fig_name, dpi=fig.dpi)
     print('Market estimation plot has been saved to {}/{}.'.format(os.getcwd(), fig_name))
@@ -106,7 +106,7 @@ def plot_sector_estimates(data: dict, info: dict, est: np.array, std: np.array):
     plt.tight_layout()
 
     if not os.path.exists('data/processed_data/volatile'):
-        os.mkdir('data/processed_data/volatile')
+        os.makedirs('data/processed_data/volatile', exist_ok=True)
     fig_name = 'data/processed_data/volatile/sector_estimation.png'
     fig.savefig(fig_name, dpi=fig.dpi)
     print('Sector estimation plot has been saved to {}/{}.'.format(os.getcwd(), fig_name))
@@ -169,7 +169,7 @@ def plot_industry_estimates(data: dict, info: dict, est: np.array, std: np.array
     plt.tight_layout()
 
     if not os.path.exists('data/processed_data/volatile'):
-        os.mkdir('data/processed_data/volatile')
+        os.makedirs('data/processed_data/volatile', exist_ok=True)
     fig_name = 'data/processed_data/volatile/industry_estimation.png'
     fig.savefig(fig_name, dpi=fig.dpi)
     print('Industry estimation plot has been saved to {}/{}.'.format(os.getcwd(), fig_name))
@@ -246,7 +246,7 @@ def plot_stock_estimates(data: dict, est: np.array, std: np.array, rank_type: st
         plt.tight_layout()
 
         if not os.path.exists('data/processed_data/volatile'):
-            os.mkdir('data/processed_data/volatile')
+            os.makedirs('data/processed_data/volatile', exist_ok=True)
         fig_name = 'data/processed_data/volatile/stock_estimation.png'
         fig.savefig(fig_name, dpi=fig.dpi)
         print('Stock estimation plot has been saved to {}/{}.'.format(os.getcwd(), fig_name))
@@ -297,7 +297,7 @@ def plot_matches(data: dict, matches: dict):
     plt.tight_layout()
 
     if not os.path.exists('data/processed_data/volatile'):
-        os.mkdir('data/processed_data/volatile')
+        os.makedirs('data/processed_data/volatile', exist_ok=True)
     fig_name = 'data/processed_data/volatile/matches_estimation.png'
     print('Matches estimation plot has been saved to {}/{}.'.format(os.getcwd(), fig_name))
     fig.savefig(fig_name, dpi=fig.dpi)
@@ -376,7 +376,7 @@ def plot_chosen_stocks_exploration(data, est, std, idx_choice_all, num_cols=3):
     plt.tight_layout()
 
     if not os.path.exists('data/processed_data/volatile'):
-        os.mkdir('data/processed_data/volatile')
+        os.makedirs('data/processed_data/volatile', exist_ok=True)
     fig_name = 'data/processed_data/volatile/exploration_chosen_stocks.png'
     print('Plot of the stocks chosen during the exploration has been saved to {}/{}.'.format(os.getcwd(), fig_name))
     fig.savefig(fig_name, dpi=fig.dpi)
