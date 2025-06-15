@@ -9,9 +9,14 @@ cache.
 ## Installation
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
+pip install --user poetry
+poetry install
+```
+
+Poetry creates an isolated virtual environment for the project. Activate it with:
+
+```bash
+poetry shell
 ```
 
 ## Usage
