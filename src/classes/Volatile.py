@@ -522,25 +522,25 @@ def volatile(
         if i < num_stocks - 1 and ranked_rates[i] != ranked_rates[i + 1]:
             print(separator)
     '''
+    # Creating a DataFrame for the prediction table
+    data = {
+        "SYMBOL": ranked_tickers.tolist(),
+        "SECTOR": ranked_sectors,
+        "INDUSTRY": ranked_industries,
+        "PRICE": [
+            "{} {}".format(np.round(ranked_p[i, -1], 2), ranked_currencies[i])
+            for i in range(num_stocks)
+        ],
+        "RATE": ranked_rates,
+        "GROWTH": ranked_growth.tolist(),
+        "VOLATILITY": ranked_volatility.tolist(),
+        "MATCH": (ranked_matches.tolist() if num_stocks > 1 else ["None"]),
+    }
+
+    volatile_df = pd.DataFrame(data)
+
     if args.save_table:
         tab_name = "data/processed_data/volatile/prediction_table.csv"
-
-        # Creating a DataFrame
-        data = {
-            "SYMBOL": ranked_tickers.tolist(),
-            "SECTOR": ranked_sectors,
-            "INDUSTRY": ranked_industries,
-            "PRICE": [
-                "{} {}".format(np.round(ranked_p[i, -1], 2), ranked_currencies[i])
-                for i in range(num_stocks)
-            ],
-            "RATE": ranked_rates,
-            "GROWTH": ranked_growth.tolist(),
-            "VOLATILITY": ranked_volatility.tolist(),
-            "MATCH": (ranked_matches.tolist() if num_stocks > 1 else ["None"]),
-        }
-
-        volatile_df = pd.DataFrame(data)
 
         # Save the DataFrame to a CSV file
         volatile_df.to_csv(tab_name, index=False)
