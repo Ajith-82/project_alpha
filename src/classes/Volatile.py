@@ -1,7 +1,6 @@
 #!/usr/bin/env python
 import numpy as np
 from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter, SUPPRESS
-import csv
 import os.path
 import pickle
 import multitasking
