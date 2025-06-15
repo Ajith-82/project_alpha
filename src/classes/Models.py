@@ -167,8 +167,12 @@ def train_msis_mcs(
     -------
     It returns a tuple of trained parameters.
     """
-    optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
     num_steps_l = int(np.ceil(num_steps // 4))
+
+    # Each optimization stage uses a fresh optimizer instance.  Adam does not
+    # allow updating variables it wasn't originally built with, so re-create it
+    # before training parameters at a new hierarchy level.
+    optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
 
     # market
     model = msis_mcs_model(info, "market")
@@ -187,9 +191,14 @@ def train_msis_mcs(
         if psi_m_init is not None
         else tf.zeros_like(sample[1])
     )
-    loss_m = tfp.math.minimize(lambda: -model.log_prob([phi_m, psi_m, logp.mean(0, keepdims=1)]),
-                             optimizer=optimizer, num_steps=num_steps_l)
+    loss_m = tfp.math.minimize(
+        lambda: -model.log_prob([phi_m, psi_m, logp.mean(0, keepdims=1)]),
+        optimizer=optimizer,
+        num_steps=num_steps_l,
+    )
+
     # sector
+    optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
     model = msis_mcs_model(info, "sector")
     phi_m, psi_m = tf.constant(phi_m), tf.constant(psi_m)
     sample = model.sample()
@@ -207,11 +216,18 @@ def train_msis_mcs(
         if psi_s_init is not None
         else tf.zeros_like(sample[3])
     )
-    logp_s = np.array([logp[np.where(np.array(info['sectors_id']) == k)[0]].mean(0) for k in range(info['num_sectors'])])
-    loss_s = tfp.math.minimize(lambda: -model.log_prob([phi_m, psi_m, phi_s, psi_s, logp_s]),
-                             optimizer=optimizer, num_steps=num_steps_l)
+    logp_s = np.array([
+        logp[np.where(np.array(info['sectors_id']) == k)[0]].mean(0)
+        for k in range(info['num_sectors'])
+    ])
+    loss_s = tfp.math.minimize(
+        lambda: -model.log_prob([phi_m, psi_m, phi_s, psi_s, logp_s]),
+        optimizer=optimizer,
+        num_steps=num_steps_l,
+    )
 
     # industry
+    optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
     model = msis_mcs_model(info, "industry")
     phi_s, psi_s = tf.constant(phi_s), tf.constant(psi_s)
     sample = model.sample()
@@ -230,9 +246,14 @@ def train_msis_mcs(
         else tf.zeros_like(sample[5])
     )
     logp_i = np.array([logp[np.where(np.array(info['industries_id']) == k)[0]].mean(0) for k in range(info['num_industries'])])
-    loss_i = tfp.math.minimize(lambda: -model.log_prob([phi_m, psi_m, phi_s, psi_s, phi_i, psi_i, logp_i]),
-                             optimizer=optimizer, num_steps=num_steps_l)
+    loss_i = tfp.math.minimize(
+        lambda: -model.log_prob([phi_m, psi_m, phi_s, psi_s, phi_i, psi_i, logp_i]),
+        optimizer=optimizer,
+        num_steps=num_steps_l,
+    )
+
     # stock
+    optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
     model = msis_mcs_model(info, "stock")
     phi_i, psi_i = tf.constant(phi_i), tf.constant(psi_i)
     sample = model.sample()
