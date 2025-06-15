@@ -8,7 +8,7 @@ def main():
     market = "india"
     # Start processing data
     if not os.path.exists("data/processed_data/volatile"):
-        os.mkdir("data/processed_data/volatile")
+        os.makedirs("data/processed_data/volatile", exist_ok=True)
     screener_volatile_dir = "data/processed_data/volatile"
     print("\nStarting Volatility based screening...")
     send_email_volatile(market, "Volatility", screener_volatile_dir)
