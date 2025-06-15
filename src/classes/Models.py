@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 import tensorflow as tf
 import tensorflow_probability as tfp
 from tensorflow_probability import distributions as tfd
+from typing import Optional
 
 def s_model(info: dict) -> tfd.JointDistributionSequentialAutoBatched:
     """
@@ -140,7 +141,7 @@ def train_msis_mcs(
     learning_rate: float = 0.01,
     num_steps: int = 10000,
     plot_losses: bool = False,
-    initial_params: tuple | None = None,
+    initial_params: Optional[tuple] = None,
 ) -> tuple:
     """
     It performs sequential optimization over the model parameters via Adam optimizer, training at different levels to
