@@ -274,6 +274,16 @@ def cli_argparser():
         action="store_true",
         help="Use cached data and parameters if available.",
     )
+    cli.add_argument(
+        "--load-model",
+        type=str,
+        help="Path to a pickle file with previously saved model parameters.",
+    )
+    cli.add_argument(
+        "--save-model",
+        type=str,
+        help="Destination path to save trained model parameters.",
+    )
     return cli.parse_args()
 
 
@@ -339,6 +349,11 @@ def volatile(
 
     info = extract_hierarchical_info(data["sectors"], data["industries"])
 
+    initial_params = None
+    if args.load_model and os.path.exists(args.load_model):
+        with open(args.load_model, "rb") as handle:
+            initial_params = pickle.load(handle)
+
     if num_stocks > 1:
         print("\nTraining a model that discovers correlations...")
         # order of the polynomial
@@ -379,11 +394,19 @@ def volatile(
     )[None, :]
 
     # train the model
-    phi_m, psi_m, phi_s, psi_s, phi_i, psi_i, phi, psi = train_msis_mcs(
-        logp, info, plot_losses=args.plot_losses
+    params = train_msis_mcs(
+        logp,
+        info,
+        plot_losses=args.plot_losses,
+        initial_params=initial_params,
     )
+    phi_m, psi_m, phi_s, psi_s, phi_i, psi_i, phi, psi = params[:8]
+    extra_params = params[8:] if len(params) > 8 else ()
 
     print("Training completed.")
+    if args.save_model:
+        with open(args.save_model, "wb") as handle:
+            pickle.dump([p.numpy() for p in params], handle)
 
     ## log-price statistics (Normal distribution)
     # calculate stock-level estimators of log-prices

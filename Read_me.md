@@ -49,3 +49,13 @@ python scripts/migrate_pickle_to_db.py <pickle_file> <database>
 ```
 
 This script reads the old cached dictionary and inserts its contents into the SQLite tables.
+
+## Saving and Loading Model Parameters
+
+Training the volatility model can be time consuming.  You can save the learned
+parameters to disk and reuse them in later runs.
+
+Use `--save-model <file>` to write the parameters after training and
+`--load-model <file>` to initialize training from a previous run.  Providing
+saved parameters allows you to resume training, reduces start-up time and
+enables incremental learning on new data.
