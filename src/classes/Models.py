@@ -134,7 +134,14 @@ def msis_mcs_model(info: dict, level: str = "stock") -> tfd.JointDistributionSeq
 
     return tfd.JointDistributionSequentialAutoBatched(m)
 
-def train_msis_mcs(logp: np.array, info: dict, learning_rate: float = 0.01, num_steps: int = 10000, plot_losses: bool = False) -> tuple:
+def train_msis_mcs(
+    logp: np.array,
+    info: dict,
+    learning_rate: float = 0.01,
+    num_steps: int = 10000,
+    plot_losses: bool = False,
+    initial_params: tuple | None = None,
+) -> tuple:
     """
     It performs sequential optimization over the model parameters via Adam optimizer, training at different levels to
     provide sensible initial solutions at finer levels.
@@ -151,6 +158,9 @@ def train_msis_mcs(logp: np.array, info: dict, learning_rate: float = 0.01, num_
         Adam's fixed number of iterations.
     plot_losses: bool
         If True, a losses decay plot is saved in the current directory.
+    initial_params: tuple | None
+        Optional tuple providing initial values for the hierarchical model
+        parameters. If not given, parameters are initialized at zero.
 
     Returns
     -------
@@ -161,13 +171,41 @@ def train_msis_mcs(logp: np.array, info: dict, learning_rate: float = 0.01, num_
 
     # market
     model = msis_mcs_model(info, "market")
-    phi_m, psi_m = (tf.Variable(tf.zeros_like(model.sample()[:2][i])) for i in range(2))
+    sample = model.sample()
+    if initial_params:
+        phi_m_init, psi_m_init = initial_params[0], initial_params[1]
+    else:
+        phi_m_init = psi_m_init = None
+    phi_m = tf.Variable(
+        tf.convert_to_tensor(phi_m_init, dtype=sample[0].dtype)
+        if phi_m_init is not None
+        else tf.zeros_like(sample[0])
+    )
+    psi_m = tf.Variable(
+        tf.convert_to_tensor(psi_m_init, dtype=sample[1].dtype)
+        if psi_m_init is not None
+        else tf.zeros_like(sample[1])
+    )
     loss_m = tfp.math.minimize(lambda: -model.log_prob([phi_m, psi_m, logp.mean(0, keepdims=1)]),
                              optimizer=optimizer, num_steps=num_steps_l)
     # sector
     model = msis_mcs_model(info, "sector")
     phi_m, psi_m = tf.constant(phi_m), tf.constant(psi_m)
-    phi_s, psi_s = (tf.Variable(tf.zeros_like(model.sample()[2:4][i])) for i in range(2))
+    sample = model.sample()
+    if initial_params:
+        phi_s_init, psi_s_init = initial_params[2], initial_params[3]
+    else:
+        phi_s_init = psi_s_init = None
+    phi_s = tf.Variable(
+        tf.convert_to_tensor(phi_s_init, dtype=sample[2].dtype)
+        if phi_s_init is not None
+        else tf.zeros_like(sample[2])
+    )
+    psi_s = tf.Variable(
+        tf.convert_to_tensor(psi_s_init, dtype=sample[3].dtype)
+        if psi_s_init is not None
+        else tf.zeros_like(sample[3])
+    )
     logp_s = np.array([logp[np.where(np.array(info['sectors_id']) == k)[0]].mean(0) for k in range(info['num_sectors'])])
     loss_s = tfp.math.minimize(lambda: -model.log_prob([phi_m, psi_m, phi_s, psi_s, logp_s]),
                              optimizer=optimizer, num_steps=num_steps_l)
@@ -175,21 +213,95 @@ def train_msis_mcs(logp: np.array, info: dict, learning_rate: float = 0.01, num_
     # industry
     model = msis_mcs_model(info, "industry")
     phi_s, psi_s = tf.constant(phi_s), tf.constant(psi_s)
-    phi_i, psi_i = (tf.Variable(tf.zeros_like(model.sample()[4:6][i])) for i in range(2))
+    sample = model.sample()
+    if initial_params:
+        phi_i_init, psi_i_init = initial_params[4], initial_params[5]
+    else:
+        phi_i_init = psi_i_init = None
+    phi_i = tf.Variable(
+        tf.convert_to_tensor(phi_i_init, dtype=sample[4].dtype)
+        if phi_i_init is not None
+        else tf.zeros_like(sample[4])
+    )
+    psi_i = tf.Variable(
+        tf.convert_to_tensor(psi_i_init, dtype=sample[5].dtype)
+        if psi_i_init is not None
+        else tf.zeros_like(sample[5])
+    )
     logp_i = np.array([logp[np.where(np.array(info['industries_id']) == k)[0]].mean(0) for k in range(info['num_industries'])])
     loss_i = tfp.math.minimize(lambda: -model.log_prob([phi_m, psi_m, phi_s, psi_s, phi_i, psi_i, logp_i]),
                              optimizer=optimizer, num_steps=num_steps_l)
     # stock
     model = msis_mcs_model(info, "stock")
     phi_i, psi_i = tf.constant(phi_i), tf.constant(psi_i)
+    sample = model.sample()
     if 'clusters_id' in info:
-        phi, psi, chi_m, xi_m, chi_c, xi_c, chi, xi = (tf.Variable(tf.zeros_like(model.sample()[6:14][i])) for i in range(8))
+        if initial_params and len(initial_params) >= 14:
+            phi_init, psi_init, chi_m_init, xi_m_init, chi_c_init, xi_c_init, chi_init, xi_init = initial_params[6:14]
+        elif initial_params:
+            phi_init, psi_init = initial_params[6:8]
+            chi_m_init = xi_m_init = chi_c_init = xi_c_init = chi_init = xi_init = None
+        else:
+            phi_init = psi_init = chi_m_init = xi_m_init = chi_c_init = xi_c_init = chi_init = xi_init = None
+        phi = tf.Variable(
+            tf.convert_to_tensor(phi_init, dtype=sample[6].dtype)
+            if phi_init is not None
+            else tf.zeros_like(sample[6])
+        )
+        psi = tf.Variable(
+            tf.convert_to_tensor(psi_init, dtype=sample[7].dtype)
+            if psi_init is not None
+            else tf.zeros_like(sample[7])
+        )
+        chi_m = tf.Variable(
+            tf.convert_to_tensor(chi_m_init, dtype=sample[8].dtype)
+            if chi_m_init is not None
+            else tf.zeros_like(sample[8])
+        )
+        xi_m = tf.Variable(
+            tf.convert_to_tensor(xi_m_init, dtype=sample[9].dtype)
+            if xi_m_init is not None
+            else tf.zeros_like(sample[9])
+        )
+        chi_c = tf.Variable(
+            tf.convert_to_tensor(chi_c_init, dtype=sample[10].dtype)
+            if chi_c_init is not None
+            else tf.zeros_like(sample[10])
+        )
+        xi_c = tf.Variable(
+            tf.convert_to_tensor(xi_c_init, dtype=sample[11].dtype)
+            if xi_c_init is not None
+            else tf.zeros_like(sample[11])
+        )
+        chi = tf.Variable(
+            tf.convert_to_tensor(chi_init, dtype=sample[12].dtype)
+            if chi_init is not None
+            else tf.zeros_like(sample[12])
+        )
+        xi = tf.Variable(
+            tf.convert_to_tensor(xi_init, dtype=sample[13].dtype)
+            if xi_init is not None
+            else tf.zeros_like(sample[13])
+        )
 
         loss = tfp.math.minimize(
             lambda: -model.log_prob([phi_m, psi_m, phi_s, psi_s, phi_i, psi_i, phi, psi, chi_m, xi_m, chi_c, xi_c, chi, xi, logp]),
                                  optimizer=optimizer, num_steps=num_steps_l)
     else:
-        phi, psi = (tf.Variable(tf.zeros_like(model.sample()[6:8][i])) for i in range(2))
+        if initial_params:
+            phi_init, psi_init = initial_params[6], initial_params[7]
+        else:
+            phi_init = psi_init = None
+        phi = tf.Variable(
+            tf.convert_to_tensor(phi_init, dtype=sample[6].dtype)
+            if phi_init is not None
+            else tf.zeros_like(sample[6])
+        )
+        psi = tf.Variable(
+            tf.convert_to_tensor(psi_init, dtype=sample[7].dtype)
+            if psi_init is not None
+            else tf.zeros_like(sample[7])
+        )
         loss = tfp.math.minimize(lambda: -model.log_prob([phi_m, psi_m, phi_s, psi_s, phi_i, psi_i, phi, psi, logp]),
                                  optimizer=optimizer, num_steps=num_steps_l)
 
