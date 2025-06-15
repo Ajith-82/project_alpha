@@ -167,7 +167,7 @@ def train_msis_mcs(
     -------
     It returns a tuple of trained parameters.
     """
-    optimizer = tf.keras.optimizers.legacy.Adam(learning_rate=learning_rate)
+    optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
     num_steps_l = int(np.ceil(num_steps // 4))
 
     # market
