@@ -69,6 +69,16 @@ def cli_argparser():
         help="Use cached data and parameters if available.",
     )
     cli.add_argument(
+        "--load-model",
+        type=str,
+        help="Path to a pickle file with previously saved model parameters.",
+    )
+    cli.add_argument(
+        "--save-model",
+        type=str,
+        help="Destination path to save trained model parameters.",
+    )
+    cli.add_argument(
         "--db-path",
         type=str,
         help="Path to SQLite database for storing price data.",
