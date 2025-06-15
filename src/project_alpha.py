@@ -97,7 +97,7 @@ def screener_value_charts(cache, market: str, index: str, symbols: list, db_path
     """
     historic_data_dir = f"data/historic_data/{market}"
     if not os.path.exists(historic_data_dir):
-        os.mkdir(historic_data_dir)
+        os.makedirs(historic_data_dir, exist_ok=True)
     
     file_prefix = f"{index}_data"
     data = load_data(cache, symbols, market, file_prefix, historic_data_dir, db_path=db_path)
@@ -107,7 +107,7 @@ def screener_value_charts(cache, market: str, index: str, symbols: list, db_path
     
     processed_data_dir = f"data/processed_data/{index}"
     if not os.path.exists(processed_data_dir):
-        os.mkdir(processed_data_dir)
+        os.makedirs(processed_data_dir, exist_ok=True)
     
     create_plot_and_email_batched("IND_screener_value_stocks", market, value_symbols, price_data, processed_data_dir)
 
@@ -133,7 +133,7 @@ def main():
         screener_dur = 3
 
     if not os.path.exists(f"data/historic_data/{market}"):
-        os.mkdir(f"data/historic_data/{market}")
+        os.makedirs(f"data/historic_data/{market}", exist_ok=True)
     data_dir = f"data/historic_data/{market}"
     file_prifix = f"{index}_data"
     data = load_data(cache, symbols, market, file_prifix, data_dir, db_path=db_path)
