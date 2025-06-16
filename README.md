@@ -48,8 +48,9 @@ Logged executions are provided via helper shell scripts
 
 ## Database Caching
 
-Price data can be saved in an SQLite file using `--db-path`.  The
-`migrate_pickle_to_db.py` script converts existing pickle caches to the new
+Price data can be saved in an SQLite file using `--db-path`.  The database
+file will be created automatically along with any missing parent directories.
+The `migrate_pickle_to_db.py` script converts existing pickle caches to the new
 format.
 
 ## Output

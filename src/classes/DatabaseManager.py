@@ -2,10 +2,18 @@ import sqlite3
 import pandas as pd
 import json
 from typing import Optional
+import os
 
 
 def connect_db(db_path: str) -> sqlite3.Connection:
-    """Return a connection to the SQLite database at ``db_path``."""
+    """Return a connection to the SQLite database at ``db_path``.
+
+    Any missing parent directories are created automatically so that a new
+    database file can be initialised without manual setup.
+    """
+    parent = os.path.dirname(db_path)
+    if parent and not os.path.exists(parent):
+        os.makedirs(parent, exist_ok=True)
     return sqlite3.connect(db_path)
 
 
