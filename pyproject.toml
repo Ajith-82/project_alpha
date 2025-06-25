@@ -24,7 +24,8 @@ dependencies = [
     "scikit-learn (>=1.7.0,<2.0.0)",
     "joblib (>=1.5.1,<2.0.0)",
     "advanced-ta (==0.1.8)",
-    "scipy (>=1.15.3,<2.0.0)"
+    "scipy (>=1.15.3,<2.0.0)",
+    "open-webui (>=0.6.15,<0.7.0)"
 ]
 
 

@@ -64,3 +64,14 @@ model experimentation.  They are optional for running the basic pipeline.
 
 Project Alpha is provided for educational purposes only and does not constitute
 financial advice.
+
+## Web Interface with Open WebUI
+
+This project ships an optional [Open WebUI](https://github.com/open-webui/open-webui) plugin located in `webui_plugins/project_alpha_pipeline.py`. After installing the `open-webui` package, you can launch the UI and load the plugin with:
+
+```bash
+pip install open-webui
+open-webui --plugins webui_plugins
+```
+
+The plugin exposes tools to run the stock scanner and fetch the latest trending symbols directly from the interface.
