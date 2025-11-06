@@ -22,6 +22,7 @@ from classes.DatabaseManager import (
     get_company_info,
 )
 from classes.Tools import ProgressBar, save_dict_with_timestamp
+from classes.DataSourceManager import get_manager
 
 
 def _handle_start_end_dates(start, end):
@@ -158,6 +159,13 @@ def download(
 
     progress.completed()
 
+    # Print data source statistics
+    try:
+        manager = get_manager(verbose=False)
+        manager.print_statistics()
+    except:
+        pass  # Skip if manager not initialized
+
     if len(price_data) == 0:
         raise Exception("No symbol with full information is available.")
 
@@ -204,48 +212,35 @@ def download_stock_data(
                 conn.close()
                 return {"price_data": pd.DataFrame(), "company_info": info}
 
-    # If the market is India, append ".NS" to the ticker symbol
-    if market == "india":
-        ticker = f"{ticker}.NS"
-
     try:
-        # Create a Ticker object for the specified stock
-        ticker_obj = yf.Ticker(ticker)
+        # Use DataSourceManager for multi-source fallback
+        manager = get_manager(verbose=False)
 
-        # Download historical price data
-        price_data = ticker_obj.history(
-            interval=interval, start=start_date, end=end_date
+        # Fetch data with automatic fallback
+        price_data, company_info = manager.fetch_stock_data(
+            market=market,
+            ticker=ticker,
+            start_date=start_date,
+            end_date=end_date,
+            interval=interval
         )
-        price_data.index = price_data.index.strftime("%Y-%m-%d")
-        price_data.sort_index(inplace=True)
 
-        # Add Adj Close
-        price_data["Adj Close"] = price_data["Close"].copy()
-        price_data = price_data.reindex(
-            columns=[
-                "Open",
-                "High",
-                "Low",
-                "Close",
-                "Adj Close",
-                "Volume",
-                "Dividends",
-                "Stock Splits",
-            ]
-        )
-        price_data = price_data.loc[~price_data.index.duplicated(keep="first")]
-        price_data = price_data.ffill().bfill().drop_duplicates()
-        price_data = add_indicators(price_data)
-        price_data = price_data.fillna(0)
+        if price_data is None or price_data.empty:
+            if conn:
+                conn.close()
+            return {"price_data": None, "company_info": None}
 
-        # Get additional stock information using yahooquery
-        company_info = ticker_obj.info
+        # Save to database if db_path is provided
         if conn:
-            insert_price_rows(conn, ticker, price_data)
-            insert_company_info(conn, ticker, company_info)
+            # For Indian market, add .NS suffix for database storage
+            db_ticker = f"{ticker}.NS" if market == "india" else ticker
+            insert_price_rows(conn, db_ticker, price_data)
+            insert_company_info(conn, db_ticker, company_info)
             conn.close()
     except Exception as e:
         print(f"Error in data download for {ticker}: {e}")
+        if conn:
+            conn.close()
         return {"price_data": None, "company_info": None}
 
     # Return a dictionary containing price data and stock information

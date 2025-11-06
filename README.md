@@ -46,6 +46,26 @@ python src/project_alpha.py --market india
 Logged executions are provided via helper shell scripts
 `run_us_stock_scanner.sh` and `run_india_stock_scanner.sh`.
 
+## Data Sources
+
+Project Alpha now supports **multiple data sources with automatic fallback**:
+
+- **Yahoo Finance (yfinance)** - Default, FREE, unlimited
+- **Twelve Data** - Optional, FREE tier (800 requests/day) - *Recommended*
+- **Alpha Vantage** - Optional, FREE tier (25 requests/day)
+
+The system automatically falls back to alternative sources if one fails, ensuring reliable data fetching.
+
+### Quick Setup (Optional)
+
+For enhanced reliability, add API keys:
+
+1. Copy `.env.example` to `.env`
+2. Add your API keys (get free keys from [Twelve Data](https://twelvedata.com/) or [Alpha Vantage](https://www.alphavantage.co/))
+3. Run normally - the system works out of the box with just yfinance!
+
+📖 **Full documentation**: See [DATA_SOURCES.md](DATA_SOURCES.md) for detailed setup, configuration options, and troubleshooting.
+
 ## Database Caching
 
 Price data can be saved in an SQLite file using `--db-path`.  The database
