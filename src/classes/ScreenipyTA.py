@@ -1,14 +1,48 @@
 import numpy as np
 import os
+from ta.trend import SMAIndicator, EMAIndicator, MACD
+from ta.momentum import RSIIndicator
+from ta.volatility import BollingerBands
 
-if 'STREAMLIT_APP' in os.environ:
-    import pandas_ta as talib
-    print('[+] Importing pandas_ta as we are running on Streamlit cloud app')
-else:
-    try:
-        import talib
-    except ImportError:
-        import pandas_ta as talib
+# Create a wrapper module to provide a consistent interface
+class talib:
+    """Wrapper class to provide pandas_ta-like interface using ta library."""
+    
+    @staticmethod
+    def ema(close, length):
+        return EMAIndicator(close=close, window=length).ema_indicator()
+    
+    @staticmethod 
+    def sma(close, length):
+        return SMAIndicator(close=close, window=length).sma_indicator()
+    
+    @staticmethod
+    def ma(close, length):
+        return SMAIndicator(close=close, window=length).sma_indicator()
+    
+    @staticmethod
+    def macd(close, fast, slow, signal):
+        macd_ind = MACD(close=close, window_fast=fast, window_slow=slow, window_sign=signal)
+        import pandas as pd
+        return pd.DataFrame({
+            f'MACD_{fast}_{slow}_{signal}': macd_ind.macd(),
+            f'MACDs_{fast}_{slow}_{signal}': macd_ind.macd_signal(),
+            f'MACDh_{fast}_{slow}_{signal}': macd_ind.macd_diff()
+        })
+    
+    @staticmethod
+    def rsi(close, length):
+        return RSIIndicator(close=close, window=length).rsi()
+    
+    @staticmethod
+    def cci(high, low, close, length):
+        from ta.trend import CCIIndicator
+        return CCIIndicator(high=high, low=low, close=close, window=length).cci()
+    
+    # Candlestick pattern methods - return False as placeholder since ta library doesn't support them
+    @staticmethod
+    def cdl_pattern(open, high, low, close, pattern):
+        return None
 
 
 class ScreenerTA:

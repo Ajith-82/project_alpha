@@ -1,113 +1,289 @@
 #!/usr/bin/env python
-from curses import raw
-import os
+"""
+Project Alpha - Stock Market Screening Application
 
-from classes.Send_email import send_email_volatile
+A comprehensive stock screening tool with volatility prediction,
+technical analysis, and multiple screening strategies.
+
+Examples:
+    # Analyze US market with all screeners
+    python project_alpha.py --market us
+
+    # Run only volatility and trend screeners on India market
+    python project_alpha.py --market india --screeners volatility,trend
+
+    # Get top 20 results in JSON format
+    python project_alpha.py --market us --top 20 --format json
+
+    # Filter stocks by price range
+    python project_alpha.py --market us --min-price 10 --max-price 500
+"""
+
+import os
 
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
 os.environ["OMP_NUM_THREADS"] = "4"
+
 import sys
-from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter, SUPPRESS
-import os.path
+import click
+import rich_click as click
+
+# Configure rich-click styling
+click.rich_click.USE_RICH_MARKUP = True
+click.rich_click.USE_MARKDOWN = True
+click.rich_click.SHOW_ARGUMENTS = True
+click.rich_click.GROUP_ARGUMENTS_OPTIONS = True
+click.rich_click.STYLE_OPTION = "bold cyan"
+click.rich_click.STYLE_SWITCH = "bold green"
+click.rich_click.STYLE_METAVAR = "yellow"
+click.rich_click.STYLE_USAGE = "bold"
+
+# Define option groups for organized help
+click.rich_click.OPTION_GROUPS = {
+    "project_alpha.py": [
+        {
+            "name": "Market Selection",
+            "options": ["--market", "--symbols"],
+        },
+        {
+            "name": "Screener Configuration", 
+            "options": ["--screeners", "--rank", "--top", "--min-price", "--max-price"],
+        },
+        {
+            "name": "Output Options",
+            "options": ["--format", "--save-table", "--no-plots", "--plot-losses", "--verbose", "--quiet", "--no-banner"],
+        },
+        {
+            "name": "Data & Caching",
+            "options": ["--cache", "--no-cache", "--db-path"],
+        },
+        {
+            "name": "Model Options",
+            "options": ["--load-model", "--save-model"],
+        },
+        {
+            "name": "Additional Features",
+            "options": ["--value"],
+        },
+    ],
+}
 
 from classes.Download import load_data, load_volatile_data
 from classes.Volatile import volatile
 from classes.Screener_ma import screener_ma
 from classes.Screener_macd import macd_screener
 from classes.Screener_donchain import donchain_screener
-#from classes.Screener_value import screener_value
 from classes.Screener_breakout import breakout_screener
+from classes.Screener_trendline import trendline_screener
+from classes.Plot_stocks import create_plot_and_email_batched
+from classes.Send_email import send_email_volatile
+from classes.Console import (
+    console, print_banner, print_section, print_success, print_error,
+    print_warning, print_info, print_summary_panel, print_config_panel,
+    create_download_progress
+)
 import classes.IndexListFetcher as Index
 import classes.Tools as tools
-from classes.Plot_stocks import create_plot_and_email_batched
-from classes.Screener_trendline import trendline_screener
-from classes. Send_email import send_email_volatile
 
-def cli_argparser():
-    cli = ArgumentParser(
-        "Volatile: your day-to-day trading companion.",
-        formatter_class=ArgumentDefaultsHelpFormatter,
-    )
-    cli.add_argument("-s", "--symbols", type=str, nargs="+", help=SUPPRESS)
-    cli.add_argument(
-        "--rank",
-        type=str,
-        default="growth",
-        choices=["rate", "growth", "volatility"],
-        help="If `rate`, stocks are ranked in the prediction table and in the stock estimation plot from "
-        "the highest below to the highest above trend; if `growth`, ranking is done from the largest"
-        " to the smallest trend growth at current date; if `volatility`, from the largest to the "
-        "smallest current volatility estimate.",
-    )
-    cli.add_argument(
-        "--market",
-        type=str,
-        default="us",
-        choices=["us", "india"],
-        help="Market name to fetch stocks list",
-    )
-    cli.add_argument(
-        "--save-table",
-        action="store_true",
-        default=True,
-        help="Save prediction table in csv format.",
-    )
-    cli.add_argument(
-        "--no-plots",
-        action="store_true",
-        help="Plot estimates with their uncertainty over time.",
-    )
-    cli.add_argument(
-        "--plot-losses",
-        action="store_true",
-        help="Plot loss function decay over training iterations.",
-    )
-    cli.add_argument(
-        "--cache",
-        action="store_true",
-        default=True,
-        help="Use cached data and parameters if available.",
-    )
-    cli.add_argument(
-        "--load-model",
-        type=str,
-        help="Path to a pickle file with previously saved model parameters.",
-    )
-    cli.add_argument(
-        "--save-model",
-        type=str,
-        help="Destination path to save trained model parameters.",
-    )
-    cli.add_argument(
-        "--db-path",
-        type=str,
-        help="Path to SQLite database for storing price data.",
-    )
-    cli.add_argument(
-        "--value",
-        action="store_true",
-        help="Plot and send value stocks from external source.",
-    )
-    return cli.parse_args()
 
+# Available screeners
+AVAILABLE_SCREENERS = ["all", "volatility", "breakout", "trend", "ma", "macd", "donchain"]
+
+
+def validate_screeners(ctx, param, value):
+    """Validate and parse screener selection."""
+    if not value:
+        return ["all"]
+    screeners = [s.strip().lower() for s in value.split(",")]
+    for s in screeners:
+        if s not in AVAILABLE_SCREENERS:
+            raise click.BadParameter(
+                f"Invalid screener '{s}'. Choose from: {', '.join(AVAILABLE_SCREENERS)}"
+            )
+    return screeners
+
+
+@click.command(context_settings={"help_option_names": ["-h", "--help"]})
+@click.option(
+    "-m", "--market",
+    type=click.Choice(["us", "india"], case_sensitive=False),
+    default="us",
+    show_default=True,
+    help="Market to analyze. **us** = S&P 500, **india** = NSE 500",
+)
+@click.option(
+    "-s", "--symbols",
+    type=str,
+    multiple=True,
+    hidden=True,
+    help="Specific stock symbols to analyze (overrides market selection)",
+)
+@click.option(
+    "--screeners",
+    type=str,
+    default="all",
+    show_default=True,
+    callback=validate_screeners,
+    help="Comma-separated screeners to run: **all**, volatility, breakout, trend, ma, macd, donchain",
+)
+@click.option(
+    "-r", "--rank",
+    type=click.Choice(["rate", "growth", "volatility"], case_sensitive=False),
+    default="growth",
+    show_default=True,
+    help="Result ranking method. **rate** = trend position, **growth** = trend strength, **volatility** = volatility estimate",
+)
+@click.option(
+    "-t", "--top",
+    type=int,
+    default=None,
+    metavar="N",
+    help="Limit results to top N stocks per screener",
+)
+@click.option(
+    "--min-price",
+    type=float,
+    default=None,
+    metavar="PRICE",
+    help="Minimum stock price filter (e.g., 10.00)",
+)
+@click.option(
+    "--max-price",
+    type=float,
+    default=None,
+    metavar="PRICE",
+    help="Maximum stock price filter (e.g., 500.00)",
+)
+@click.option(
+    "-f", "--format",
+    "output_format",
+    type=click.Choice(["table", "csv", "json"], case_sensitive=False),
+    default="table",
+    show_default=True,
+    help="Output format for results",
+)
+@click.option(
+    "--save-table/--no-save-table",
+    default=True,
+    show_default=True,
+    help="Save results to CSV file",
+)
+@click.option(
+    "--no-plots",
+    is_flag=True,
+    default=False,
+    help="Disable chart generation",
+)
+@click.option(
+    "--plot-losses",
+    is_flag=True,
+    default=False,
+    help="Show loss function decay during model training",
+)
+@click.option(
+    "-v", "--verbose",
+    is_flag=True,
+    default=False,
+    help="Enable verbose output with debug information",
+)
+@click.option(
+    "-q", "--quiet",
+    is_flag=True,
+    default=False,
+    help="Minimal output (errors only)",
+)
+@click.option(
+    "--no-banner",
+    is_flag=True,
+    default=False,
+    help="Skip the ASCII banner",
+)
+@click.option(
+    "--cache/--no-cache",
+    default=True,
+    show_default=True,
+    help="Use cached data if available",
+)
+@click.option(
+    "--db-path",
+    type=click.Path(),
+    default=None,
+    metavar="PATH",
+    help="SQLite database path for persistent price data storage",
+)
+@click.option(
+    "--load-model",
+    type=click.Path(exists=True),
+    default=None,
+    metavar="FILE",
+    help="Load pre-trained model parameters from pickle file",
+)
+@click.option(
+    "--save-model",
+    type=click.Path(),
+    default=None,
+    metavar="FILE",
+    help="Save trained model parameters to pickle file",
+)
+@click.option(
+    "--value",
+    is_flag=True,
+    default=False,
+    help="Include value stocks from external screener sources (India only)",
+)
+@click.version_option(version="0.1.0", prog_name="Project Alpha")
+def cli(market, symbols, screeners, rank, top, min_price, max_price, output_format,
+        save_table, no_plots, plot_losses, verbose, quiet, no_banner, cache,
+        db_path, load_model, save_model, value):
+    """
+    🚀 **Project Alpha** - Your Day-to-Day Trading Companion
+    
+    A comprehensive stock screening tool featuring:
+    
+    - **Volatility Analysis**: TensorFlow Probability-based predictions
+    - **Technical Screeners**: Breakout, Trend, MA, MACD, Donchain
+    - **Multi-Market Support**: US (S&P 500) and India (NSE 500)
+    
+    ---
+    
+    **Quick Start:**
+    
+        $ python project_alpha.py --market us
+        $ python project_alpha.py --market india --screeners volatility,trend
+    """
+    # Create args namespace for backward compatibility
+    class Args:
+        pass
+    
+    args = Args()
+    args.market = market.lower()
+    args.symbols = list(symbols) if symbols else None
+    args.screeners = screeners
+    args.rank = rank.lower()
+    args.top = top
+    args.min_price = min_price
+    args.max_price = max_price
+    args.output_format = output_format.lower()
+    args.save_table = save_table
+    args.no_plots = no_plots
+    args.plot_losses = plot_losses
+    args.verbose = verbose
+    args.quiet = quiet
+    args.no_banner = no_banner
+    args.cache = cache
+    args.db_path = db_path
+    args.load_model = load_model
+    args.save_model = save_model
+    args.value = value
+    
+    # Run main with enhanced args
+    run_screening(args)
 
 
 def screener_value_charts(cache, market: str, index: str, symbols: list, db_path: str = None):
-    """
-    Screener value charts for a given market, index, and list of symbols.
-
-    Args:
-        cache: The cache object for data storage.
-        market (str): The market for which the data is being processed.
-        index (str): The index for which the data is being processed.
-        symbols (list): The list of symbols for which the data is being processed.
-
-    Returns:
-        None
-    """
+    """Generate value stock charts for a given market and symbols."""
     historic_data_dir = f"data/historic_data/{market}"
-    if not os.path.exists(historic_data_dir):
-        os.makedirs(historic_data_dir, exist_ok=True)
+    os.makedirs(historic_data_dir, exist_ok=True)
     
     file_prefix = f"{index}_data"
     data = load_data(cache, symbols, market, file_prefix, historic_data_dir, db_path=db_path)
@@ -116,94 +292,169 @@ def screener_value_charts(cache, market: str, index: str, symbols: list, db_path
     value_symbols = data["tickers"]
     
     processed_data_dir = f"data/processed_data/{index}"
-    if not os.path.exists(processed_data_dir):
-        os.makedirs(processed_data_dir, exist_ok=True)
+    os.makedirs(processed_data_dir, exist_ok=True)
     
     create_plot_and_email_batched("IND_screener_value_stocks", market, value_symbols, price_data, processed_data_dir)
 
 
-def main():
-    # Cleanup report directories
-    tools.cleanup_directory_files("data/processed_data")
-
-    args = cli_argparser()
+def run_screening(args):
+    """Run the stock screening application with the given arguments."""
+    
+    # Display banner (unless --no-banner or --quiet)
+    if not args.no_banner and not args.quiet:
+        print_banner()
+    
+    # Display configuration
+    if not args.quiet:
+        print_config_panel(args)
+    
+    # Initialize variables
     cache = args.cache
     market = args.market
     db_path = args.db_path
-
-    # Load data
+    results = {}  # Track screener results
+    screeners_to_run = args.screeners if hasattr(args, 'screeners') else ["all"]
+    
+    # Cleanup report directories
+    tools.cleanup_directory_files("data/processed_data")
+    if not args.quiet:
+        print_success("Cleaned up previous report directories")
+    
+    # Load market data
+    if not args.quiet:
+        print_section("Loading Market Data", "📥")
+    
     if market == "india":
         index, symbols = Index.nse_500()
         screener_dur = 3
+        if not args.quiet:
+            print_info(f"Loading NSE 500 index ({len(symbols)} stocks)")
         if args.value:
             value_index, value_symbols = Index.ind_screener_value_stocks()
             screener_value_charts(cache, market, value_index, value_symbols, db_path)
     else:
         index, symbols = Index.sp_500()
         screener_dur = 3
+        if not args.quiet:
+            print_info(f"Loading S&P 500 index ({len(symbols)} stocks)")
 
-    if not os.path.exists(f"data/historic_data/{market}"):
-        os.makedirs(f"data/historic_data/{market}", exist_ok=True)
+    # Create data directories
     data_dir = f"data/historic_data/{market}"
-    file_prifix = f"{index}_data"
-    data = load_data(cache, symbols, market, file_prifix, data_dir, db_path=db_path)
-
-    # Start processing data
-    print("\nStarting Volatility based screening...")
-    volatile_data = load_volatile_data(market, data)
-    volatile_df = volatile(args, volatile_data)
-    volatile_symbols_top = volatile_df["SYMBOL"].head(200).tolist()
-    volatile_symbols_bottom = volatile_df["SYMBOL"].tail(200).tolist()
-    #send_email_volatile(market, "data/processed_data/volatile")
-    print("\nFinished Volatility based screening...")
-
-    '''
-    # Start MA screener
-    ma_screener_out_dir = "data/processed_data/screener_ma"
-    print("\nStarting MA based screening...")
-    ma_screener_out = screener_ma(data, screener_dur)
-    ma_screener_symbols =list(ma_screener_out.keys())
-    create_plot_and_email_batched("MA screener", market, ma_screener_symbols, data, ma_screener_out_dir)
-    print("\nFinished MA based screening...")
-
-    # Start MACD screener
-    macd_screener_out_dir = "data/processed_data/screener_macd"
-    print("\nStarting MACD based screening...")
-    macd_screener_out = macd_screener(data, screener_dur)
-    macd_screener_symbols = macd_screener_out["BUY"]
-    create_plot_and_email_batched("MACD screener", market, macd_screener_symbols, data, macd_screener_out_dir)
-    print("\nFinished MACD based screening...")
-
-    # Start Donchain screener
-    macd_screener_out_dir = "data/processed_data/screener_donchain"
-    print("\nStarting Donchain based screening...")
-    donchain_screener_out = donchain_screener(data, screener_dur)
-    donchain_screener_symbols = donchain_screener_out["BUY"]
-    create_plot_and_email_batched("Donchain screener", market, donchain_screener_symbols, data, macd_screener_out_dir)
-    print("\nFinished Donchain based screening...")
+    os.makedirs(data_dir, exist_ok=True)
     
-    '''
-    # Start breakout screener
-    breakout_screener_out_dir = "data/processed_data/screener_breakout"
-    print("\nStarting Breakout based screening...")
-    breakout_screener_out = breakout_screener(data, volatile_symbols_bottom)
-    breakout_screener_out_symbols = breakout_screener_out["BUY"]
-    create_plot_and_email_batched("Breakout screener", market, breakout_screener_out_symbols, data, breakout_screener_out_dir)
-    tools.save_screener_results_to_csv(market, "screener_breakout", breakout_screener_out_symbols)
-    print("\nFinished Breakout based screening...")
+    file_prefix = f"{index}_data"
+    data = load_data(cache, symbols, market, file_prefix, data_dir, db_path=db_path)
     
-    # Start trend screener
-    trend_screener_out_dir = "data/processed_data/screener_trend"
-    trend_screener_history = "data/processed_data/screener_trend_history"
-    print("\nStarting trend based screening...")
-    trend_screener_out = trendline_screener(data, volatile_symbols_top, screener_dur)
-    trend_screener_out_symbols = [ticker for ticker, _ in trend_screener_out['Trend']]
-    create_plot_and_email_batched("Trend screener", market, trend_screener_out_symbols, data, trend_screener_out_dir)
-    trend_history_file = tools.save_screener_results_to_csv(market, "screener_trend", trend_screener_out_symbols)
-    trend_common = tools.find_common_symbols(trend_history_file, 5)
-    if len(trend_common) > 0:
-        create_plot_and_email_batched("Trending stocks in last 5 days", market, trend_common, data, trend_screener_history)
-    print("\nFinished trend based screening...")
+    total_stocks = len(data.get("tickers", []))
+    if not args.quiet:
+        print_success(f"Loaded data for {total_stocks} stocks")
+    
+    # Apply price filters if specified
+    if hasattr(args, 'min_price') and args.min_price is not None:
+        if not args.quiet:
+            print_info(f"Filtering stocks with price >= ${args.min_price}")
+    if hasattr(args, 'max_price') and args.max_price is not None:
+        if not args.quiet:
+            print_info(f"Filtering stocks with price <= ${args.max_price}")
+    
+    # Determine which screeners to run
+    run_all = "all" in screeners_to_run
+    
+    # Volatility Screening
+    if run_all or "volatility" in screeners_to_run:
+        if not args.quiet:
+            print_section("Volatility Screening", "📊")
+            console.print("[dim]Running TensorFlow Probability model...[/dim]")
+        
+        volatile_data = load_volatile_data(market, data)
+        volatile_df = volatile(args, volatile_data)
+        volatile_symbols_top = volatile_df["SYMBOL"].head(200).tolist()
+        volatile_symbols_bottom = volatile_df["SYMBOL"].tail(200).tolist()
+        
+        if not args.quiet:
+            print_success(f"Identified {len(volatile_symbols_top)} high-volatility stocks")
+            print_success(f"Identified {len(volatile_symbols_bottom)} low-volatility stocks")
+        results["Volatility"] = len(volatile_symbols_top)
+    else:
+        volatile_symbols_top = []
+        volatile_symbols_bottom = []
+    
+    # Breakout Screening
+    if run_all or "breakout" in screeners_to_run:
+        if not args.quiet:
+            print_section("Breakout Screening", "🚀")
+        
+        breakout_screener_out_dir = "data/processed_data/screener_breakout"
+        tickers_to_screen = volatile_symbols_bottom if volatile_symbols_bottom else data.get("tickers", [])
+        breakout_screener_out = breakout_screener(data, tickers_to_screen)
+        breakout_screener_out_symbols = breakout_screener_out["BUY"]
+        
+        # Apply --top limit if specified
+        if hasattr(args, 'top') and args.top and len(breakout_screener_out_symbols) > args.top:
+            breakout_screener_out_symbols = breakout_screener_out_symbols[:args.top]
+        
+        if breakout_screener_out_symbols:
+            if not args.no_plots:
+                create_plot_and_email_batched("Breakout screener", market, breakout_screener_out_symbols, data, breakout_screener_out_dir)
+            if args.save_table:
+                tools.save_screener_results_to_csv(market, "screener_breakout", breakout_screener_out_symbols)
+            if not args.quiet:
+                print_success(f"Found {len(breakout_screener_out_symbols)} breakout candidates")
+        else:
+            if not args.quiet:
+                print_warning("No breakout candidates found")
+        results["Breakout"] = len(breakout_screener_out_symbols)
+    
+    # Trend Screening
+    if run_all or "trend" in screeners_to_run:
+        if not args.quiet:
+            print_section("Trend Screening", "📈")
+        
+        trend_screener_out_dir = "data/processed_data/screener_trend"
+        trend_screener_history = "data/processed_data/screener_trend_history"
+        
+        tickers_to_screen = volatile_symbols_top if volatile_symbols_top else data.get("tickers", [])[:200]
+        trend_screener_out = trendline_screener(data, tickers_to_screen, screener_dur)
+        trend_screener_out_symbols = [ticker for ticker, _ in trend_screener_out['Trend']]
+        
+        # Apply --top limit if specified
+        if hasattr(args, 'top') and args.top and len(trend_screener_out_symbols) > args.top:
+            trend_screener_out_symbols = trend_screener_out_symbols[:args.top]
+        
+        if trend_screener_out_symbols:
+            if not args.no_plots:
+                create_plot_and_email_batched("Trend screener", market, trend_screener_out_symbols, data, trend_screener_out_dir)
+            if args.save_table:
+                trend_history_file = tools.save_screener_results_to_csv(market, "screener_trend", trend_screener_out_symbols)
+            if not args.quiet:
+                print_success(f"Found {len(trend_screener_out_symbols)} trending stocks")
+            
+            # Check for consistently trending stocks
+            if args.save_table:
+                trend_common = tools.find_common_symbols(trend_history_file, 5)
+                if len(trend_common) > 0:
+                    if not args.no_plots:
+                        create_plot_and_email_batched("Trending stocks in last 5 days", market, trend_common, data, trend_screener_history)
+                    if not args.quiet:
+                        print_success(f"Found {len(trend_common)} consistently trending stocks")
+        else:
+            if not args.quiet:
+                print_warning("No trending stocks found")
+        results["Trend"] = len(trend_screener_out_symbols)
+    
+    # Summary
+    if not args.quiet:
+        screeners_run = [s for s in ["Volatility", "Breakout", "Trend"] if s in results]
+        print_summary_panel(
+            market=market,
+            total_stocks=total_stocks,
+            screeners_run=screeners_run,
+            results=results
+        )
+        
+        console.print("\n[dim]Reports saved to data/processed_data/[/dim]")
+        console.print("[bold green]✨ Screening complete![/bold green]\n")
+
 
 if __name__ == "__main__":
-    main()
+    cli()

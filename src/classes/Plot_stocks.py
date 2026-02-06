@@ -128,8 +128,20 @@ def add_donchain_chart(fig, df, low=20, high=20):
     Returns:
     None
     """
-    # calculate donchian channels
-    df[['don_low', 'don_mid', 'don_high']] = df.ta.donchian(lower_length=low, upper_length=high)
+    # calculate donchian channels using ta library
+    try:
+        from ta.volatility import DonchianChannel
+        donchian = DonchianChannel(high=df["High"], low=df["Low"], close=df["Close"], window=high)
+        df = df.copy()
+        df["don_high"] = donchian.donchian_channel_hband()
+        df["don_mid"] = donchian.donchian_channel_mband()
+        df["don_low"] = donchian.donchian_channel_lband()
+    except ImportError:
+        # Fallback: calculate manually
+        df = df.copy()
+        df["don_high"] = df["High"].rolling(window=high).max()
+        df["don_low"] = df["Low"].rolling(window=low).min()
+        df["don_mid"] = (df["don_high"] + df["don_low"]) / 2
 
     # Add Donchian Channels
     don_high_trace = go.Scatter(x=df.index, y=df["don_high"], name="don_high", line=dict(color="red", width=2, dash="dash"))
@@ -138,6 +150,7 @@ def add_donchain_chart(fig, df, low=20, high=20):
     fig.add_trace(don_mid_trace, row=1, col=1)
     don_low_trace = go.Scatter(x=df.index, y=df["don_low"], name="don_low", line=dict(color="purple", width=2, dash="dash"))
     fig.add_trace(don_low_trace, row=1, col=1)
+
 
 
 def plot_strategy_multiple(market, tickers, data, out_dir, max_bars=200):
@@ -269,4 +282,8 @@ def create_plot_and_email_batched(screener: str, market: str, symbols: list, dat
         batch_out_dir = f"{out_dir}_batch_{i}"
         os.makedirs(batch_out_dir, exist_ok=True)
         plot_strategy_multiple(market, batch_symbols, plot_data, batch_out_dir)
-        send_email(market, screener, batch_out_dir)
+        try:
+            send_email(market, screener, batch_out_dir)
+        except FileNotFoundError:
+            # Email config not found, skip email sending
+            pass

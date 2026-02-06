@@ -1,32 +1,28 @@
-import pandas_ta as ta
+from ta.trend import SMAIndicator, MACD
+from ta.momentum import RSIIndicator
 
 def add_sma_indicator(df):
     # Add SMA indicators to data
-    df["SMA_10"] = ta.sma(df["Adj Close"], length=10)
-    df["SMA_30"] = ta.sma(df["Adj Close"], length=30)
-    df["SMA_50"] = ta.sma(df["Adj Close"], length=50)
-    df["SMA_200"] = ta.sma(df["Adj Close"], length=200)
+    df["SMA_10"] = SMAIndicator(close=df["Adj Close"], window=10).sma_indicator()
+    df["SMA_30"] = SMAIndicator(close=df["Adj Close"], window=30).sma_indicator()
+    df["SMA_50"] = SMAIndicator(close=df["Adj Close"], window=50).sma_indicator()
+    df["SMA_200"] = SMAIndicator(close=df["Adj Close"], window=200).sma_indicator()
 
     return df
 
 def add_macd_indicator(df):
     # Add MACD indicator to data
-    macd = ta.macd(df["Adj Close"], fast=12, slow=26, signal=9)
-    df["MACD"] = macd["MACD_12_26_9"]
-    df["MACD_signal"] = macd["MACDs_12_26_9"]
-    df["MACD_hist"] = macd["MACDh_12_26_9"]
+    macd = MACD(close=df["Adj Close"], window_slow=26, window_fast=12, window_sign=9)
+    df["MACD"] = macd.macd()
+    df["MACD_signal"] = macd.macd_signal()
+    df["MACD_hist"] = macd.macd_diff()
 
     return df
 
 def add_rsi_indicator(df):
     # Add RSI indicator to data
-    delta = df["Close"].diff(1)
-    gain = delta.where(delta > 0, 0)
-    loss = -delta.where(delta < 0, 0)
-    avg_gain = gain.rolling(window=14).mean()
-    avg_loss = loss.rolling(window=14).mean()
-    rs = avg_gain / avg_loss
-    df["RSI"] = 100 - (100 / (1 + rs))
+    rsi = RSIIndicator(close=df["Close"], window=14)
+    df["RSI"] = rsi.rsi()
 
     return df
 

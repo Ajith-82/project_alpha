@@ -1,16 +1,23 @@
 #!/usr/bin/env python
+"""
+Download Module
+
+Orchestrates stock data downloading, caching, and validation.
+This is a refactored version that uses the modular data layer components.
+"""
+
 import os
 import sys
-import pickle
 import csv
-import requests
-import numpy as np
-from typing import Dict, List, Union
+import logging
+from typing import Dict, List, Optional, Union
 from datetime import datetime, timedelta
-import multitasking
+
+import numpy as np
 import pandas as pd
-import yfinance as yf
-from typing import Union
+import requests
+
+from classes.data import StockFetcher, CacheManager, DataValidator
 from classes.Add_indicators import add_indicators
 from classes.DatabaseManager import (
     connect_db,
@@ -23,8 +30,19 @@ from classes.DatabaseManager import (
 )
 from classes.Tools import ProgressBar, save_dict_with_timestamp
 
+# Try to import Rich progress components
+try:
+    from classes.Console import create_download_progress, console
+    RICH_AVAILABLE = True
+except ImportError:
+    RICH_AVAILABLE = False
+
+
+logger = logging.getLogger(__name__)
+
 
 def _handle_start_end_dates(start, end):
+    """Convert start/end dates to timestamps."""
     if end is None:
         end = int(datetime.timestamp(datetime.today()))
     elif isinstance(end, str):
@@ -36,35 +54,32 @@ def _handle_start_end_dates(start, end):
     return start, end
 
 
-def load_cache(file_prefix, source_dir="."):
+def _date_from_timestamp(ts: int) -> str:
+    """Convert timestamp to YYYY-MM-DD string."""
+    return datetime.fromtimestamp(ts).strftime("%Y-%m-%d")
+
+
+def load_cache(file_prefix: str, source_dir: str = ".") -> Optional[Dict]:
     """
-    Load a dictionary from a file.
-
-    Parameters:
-    - file_prefix: str, the prefix for the file (without extension).
-    - source_dir: str, the source directory for the file (default is the current directory).
-
+    Load a dictionary from a pickle cache file.
+    
+    Uses CacheManager for consistent caching behavior.
+    
+    Args:
+        file_prefix: Prefix for the cache file
+        source_dir: Directory containing cache files
+        
     Returns:
-    - dict or None: The loaded dictionary or None if the file doesn't exist.
+        Cached data or empty dict if not found
     """
-    # Generate timestamp in YYMMDD format
-    timestamp = datetime.now().strftime("%y%m%d")
-
-    # Create a new file name with the timestamp
-    file_path = os.path.join(source_dir, f"{file_prefix}_{timestamp}.pkl")
-
-    if os.path.exists(file_path):
-        try:
-            with open(file_path, "rb") as file:
-                loaded_dict = pickle.load(file)
-                print(f"Using data saved to {file.name}.")
-                return loaded_dict
-        except Exception as e:
-            print(f"Error loading dictionary: {e}")
-            return {}
-    else:
-        print(f"File not found: {file_path}")
-        return {}
+    cache_manager = CacheManager(cache_dir=source_dir)
+    data = cache_manager.get(file_prefix)
+    
+    if data:
+        return data
+    
+    print(f"Cache not found for {file_prefix}")
+    return {}
 
 
 def download(
@@ -74,98 +89,132 @@ def download(
     end: Union[str, int] = None,
     interval: str = "1d",
     db_path: str = None,
+    use_rich_progress: bool = True,
 ) -> Dict[str, Union[List[str], Dict[str, pd.DataFrame], Dict[str, str]]]:
     """
-    Download historical data for tickers in the list.
-
-    Parameters
-    ----------
-    tickers: list
-        Tickers for which to download historical information.
-    start: str or int
-        Start download data from this date.
-    end: str or int
-        End download data at this date.
-    interval: str
-        Frequency between data.
-
-    Returns
-    -------
-    data: dict
-        Dictionary including the following keys:
-        - tickers: list of tickers
-        - price_data: dictionary of pandas dataframes with stock prices
-        - company_info: dictionary of company information
+    Download historical data for tickers with Rich progress support.
+    
+    Uses the refactored StockFetcher with retry logic and validation.
+    
+    Args:
+        market: Market identifier ("us" or "india")
+        tickers: List of ticker symbols
+        start: Start date (str or timestamp)
+        end: End date (str or timestamp)
+        interval: Data frequency (default "1d")
+        db_path: Optional SQLite database path
+        use_rich_progress: Use Rich progress bar if available
+        
+    Returns:
+        Dictionary with 'tickers', 'price_data', and 'company_info'
     """
+    # Normalize tickers
     tickers = (
         tickers
         if isinstance(tickers, (list, set, tuple))
         else tickers.replace(",", " ").split()
     )
-    tickers = [ticker.upper() for ticker in tickers if ticker is not None]
-    tickers = list(set(tickers))
-
+    tickers = list(set(t.upper() for t in tickers if t))
+    
+    # Handle dates
+    start_ts, end_ts = _handle_start_end_dates(start, end)
+    start_date = _date_from_timestamp(start_ts)
+    end_date = _date_from_timestamp(end_ts)
+    
+    # Initialize Rich progress if available
+    progress = None
+    task_id = None
+    completed_count = [0]
+    
+    if use_rich_progress and RICH_AVAILABLE:
+        progress = create_download_progress()
+        progress.start()
+        task_id = progress.add_task(
+            f"[cyan]Downloading {market.upper()} stocks...",
+            total=len(tickers)
+        )
+    
+    def progress_callback(ticker: str, completed: int, total: int):
+        """Update progress bar."""
+        completed_count[0] = completed
+        if progress and task_id is not None:
+            progress.update(task_id, completed=completed)
+        elif not progress:
+            # Fallback to simple progress
+            if completed % 50 == 0 or completed == total:
+                print(f"Downloaded {completed}/{total} stocks...")
+    
+    # Create fetcher with retry logic
+    fetcher = StockFetcher(
+        max_retries=3,
+        retry_delays=[1, 2, 4],
+        progress_callback=progress_callback,
+        verbose=False,
+    )
+    
+    # Fetch batch
+    results = fetcher.fetch_batch(
+        tickers=tickers,
+        market=market,
+        start_date=start_date,
+        end_date=end_date,
+        interval=interval,
+    )
+    
+    # Stop progress bar
+    if progress:
+        progress.stop()
+    
+    # Validate results
+    validator = DataValidator(nan_threshold=0.33, min_rows=5)
+    
+    # Extract successful results
     price_data = {}
     company_info = {}
-
-    start, end = _handle_start_end_dates(start, end)
-
-    @multitasking.task
-    def download_one_threaded(
-        market: str,
-        ticker: str,
-        start: str,
-        end: str,
-        interval: str = "1d",
-        db_path: str = None,
-    ):
-        """
-        Download historical data for a single ticker with multithreading.
-        Plus, it scrapes missing stock information.
-
-        Parameters
-        ----------
-        ticker: str
-            Ticker for which to download historical information.
-        interval: str
-            Frequency between data.
-        start: str
-            Start download data from this date.
-        end: str
-            End download data at this date.
-        """
-        ticker_data = download_stock_data(
-            market, ticker, start, end, interval, db_path=db_path
-        )
-        data = ticker_data["price_data"]
-        info = ticker_data["company_info"]
-
-        if isinstance(data, pd.DataFrame):
-            price_data[ticker] = data
-        if info:
-            company_info[ticker] = info
-
-        progress.animate()
-
-    num_threads = min([len(tickers), multitasking.cpu_count() * 2])
-    multitasking.set_max_threads(num_threads)
-
-    progress = ProgressBar(len(tickers), "completed")
-
-    for ticker in tickers:
-        download_one_threaded(market, ticker, start, end, interval, db_path)
-    multitasking.wait_for_tasks()
-
-    progress.completed()
-
+    
+    for ticker, result in results.items():
+        if result.success and result.price_data is not None:
+            # Validate price data
+            validation = validator.validate_price_data(result.price_data, ticker)
+            
+            if validation.valid:
+                price_data[ticker] = result.price_data
+                if result.company_info:
+                    company_info[ticker] = result.company_info
+                    
+                # Save to database if path provided
+                if db_path:
+                    _save_to_db(db_path, ticker, result.price_data, result.company_info)
+            else:
+                logger.warning(f"Invalid data for {ticker}: {validation.errors}")
+        else:
+            logger.warning(f"Failed to fetch {ticker}: {result.error}")
+    
     if len(price_data) == 0:
-        raise Exception("No symbol with full information is available.")
+        raise Exception("No symbol with valid data is available.")
+    
+    # Log summary
+    success_rate = len(price_data) / len(tickers) * 100
+    logger.info(f"Successfully downloaded {len(price_data)}/{len(tickers)} stocks ({success_rate:.1f}%)")
+    
+    return {
+        "tickers": list(price_data.keys()),
+        "price_data": price_data,
+        "company_info": company_info,
+    }
 
-    return dict(
-        tickers=list(price_data.keys()),
-        price_data=price_data,
-        company_info=company_info,
-    )
+
+def _save_to_db(db_path: str, ticker: str, price_data: pd.DataFrame, company_info: Dict):
+    """Save data to SQLite database."""
+    try:
+        conn = connect_db(db_path)
+        create_tables(conn)
+        insert_price_rows(conn, ticker, price_data)
+        if company_info:
+            insert_company_info(conn, ticker, company_info)
+        conn.close()
+    except Exception as e:
+        logger.warning(f"Failed to save {ticker} to database: {e}")
 
 
 def download_stock_data(
@@ -175,21 +224,24 @@ def download_stock_data(
     end_date: str,
     interval: str = "1d",
     db_path: str = None,
-) -> dict:
+) -> Dict:
     """
-    Download historical price and ticker info data for a single stock.
-
-    Parameters:
-    - market (str): Market name ("india" for NSE, otherwise ignored).
-    - ticker (str): Ticker symbol of the stock.
-    - start_date (str): Start date for data download.
-    - end_date (str): End date for data download.
-    - interval (str): Frequency of data (default is "1d" for daily).
-
+    Download historical data for a single stock.
+    
+    Wrapper around StockFetcher.fetch_one() for backward compatibility.
+    
+    Args:
+        market: Market identifier
+        ticker: Stock ticker symbol
+        start_date: Start date
+        end_date: End date
+        interval: Data frequency
+        db_path: Optional database path
+        
     Returns:
-    - data (dict): A dictionary containing historical price data and stock information.
+        Dictionary with 'price_data' and 'company_info'
     """
-
+    # Check database for existing data
     conn = None
     if db_path:
         conn = connect_db(db_path)
@@ -203,53 +255,30 @@ def download_stock_data(
                 info = get_company_info(conn, ticker)
                 conn.close()
                 return {"price_data": pd.DataFrame(), "company_info": info}
-
-    # If the market is India, append ".NS" to the ticker symbol
-    if market == "india":
-        ticker = f"{ticker}.NS"
-
-    try:
-        # Create a Ticker object for the specified stock
-        ticker_obj = yf.Ticker(ticker)
-
-        # Download historical price data
-        price_data = ticker_obj.history(
-            interval=interval, start=start_date, end=end_date
-        )
-        price_data.index = price_data.index.strftime("%Y-%m-%d")
-        price_data.sort_index(inplace=True)
-
-        # Add Adj Close
-        price_data["Adj Close"] = price_data["Close"].copy()
-        price_data = price_data.reindex(
-            columns=[
-                "Open",
-                "High",
-                "Low",
-                "Close",
-                "Adj Close",
-                "Volume",
-                "Dividends",
-                "Stock Splits",
-            ]
-        )
-        price_data = price_data.loc[~price_data.index.duplicated(keep="first")]
-        price_data = price_data.ffill().bfill().drop_duplicates()
-        price_data = add_indicators(price_data)
-        price_data = price_data.fillna(0)
-
-        # Get additional stock information using yahooquery
-        company_info = ticker_obj.info
+    
+    # Fetch using StockFetcher
+    fetcher = StockFetcher(max_retries=3)
+    result = fetcher.fetch_one(ticker, market, start_date, end_date, interval)
+    
+    if result.success:
+        # Save to database
+        if conn and result.price_data is not None:
+            insert_price_rows(conn, ticker, result.price_data)
+            if result.company_info:
+                insert_company_info(conn, ticker, result.company_info)
+        
         if conn:
-            insert_price_rows(conn, ticker, price_data)
-            insert_company_info(conn, ticker, company_info)
             conn.close()
-    except Exception as e:
-        print(f"Error in data download for {ticker}: {e}")
-        return {"price_data": None, "company_info": None}
-
-    # Return a dictionary containing price data and stock information
-    return {"price_data": price_data, "company_info": company_info}
+        
+        return {
+            "price_data": result.price_data,
+            "company_info": result.company_info,
+        }
+    
+    if conn:
+        conn.close()
+    
+    return {"price_data": None, "company_info": None}
 
 
 def load_data(
@@ -259,39 +288,46 @@ def load_data(
     file_prefix: str = "",
     data_dir: str = "",
     db_path: str = None,
-) -> dict:
+    use_rich_progress: bool = True,
+) -> Dict:
     """
-    Load historical data from cache or download it if not available.
-
+    Load historical data from cache or download if not available.
+    
     Args:
-        cache (str): Cache indicator. If not empty, the function will try to load data from cache.
-        symbols (List[str], optional): List of symbols to download data for. Defaults to None.
-        market (str, optional): Market information. Defaults to "".
-        file_prefix (str, optional): Prefix for the file to save the data. Defaults to "".
-        data_dir (str, optional): Directory to save the data. Defaults to "".
-
+        cache: If truthy, try to load from cache first
+        symbols: List of symbols to download
+        market: Market identifier
+        file_prefix: Prefix for cache files
+        data_dir: Directory for cache files
+        db_path: Optional database path
+        use_rich_progress: Use Rich progress bar
+        
     Returns:
-        dict: Dictionary containing the historical data.
+        Dictionary containing historical data
     """
-    while cache:
+    # Try loading from cache
+    if cache:
         print("\nLoading historical data...")
-        data = load_cache(file_prefix, data_dir)
+        cache_manager = CacheManager(cache_dir=data_dir)
+        data = cache_manager.get(file_prefix)
         if data:
             return data
-        else:
-            cache = ""
-
+    
+    # Get symbols if not provided
     if symbols is None:
         symbols_file_path = "symbols_list.txt"
         if os.path.exists(symbols_file_path):
-            with open(symbols_file_path, "r") as my_file:
-                symbols = my_file.readline().split(" ")
+            with open(symbols_file_path, "r") as f:
+                symbols = f.readline().split(" ")
         else:
             print("No symbols information to download data. Exit script.")
             sys.exit()
-
+    
+    # Download data
     print("\nDownloading historical data...")
-    data = download(market, symbols, db_path=db_path)
+    data = download(market, symbols, db_path=db_path, use_rich_progress=use_rich_progress)
+    
+    # Merge with database data if available
     if db_path:
         conn = connect_db(db_path)
         price_data = {}
@@ -301,8 +337,10 @@ def load_data(
                 price_data[sym] = df
         data["price_data"] = price_data
         conn.close()
+    
+    # Save to cache
     save_dict_with_timestamp(data, file_prefix, data_dir)
-
+    
     return data
 
 
@@ -314,15 +352,20 @@ def load_volatile_data(
     interval: str = "1d",
 ) -> Dict:
     """
-    Load volatile data for the given market and data, within the specified time interval.
-    :param market: str - the market for which the data is being loaded
-    :param data: Dict - the data to be loaded
-    :param start: Union[str, int] - the start date or index for the data
-    :param end: Union[str, int] - the end date or index for the data
-    :param interval: str - the time interval for the data
-    :return: Dict - the loaded volatile data
+    Load volatile data for the given market and data.
+    
+    Transforms raw price data into the format needed for volatility analysis.
+    
+    Args:
+        market: Market identifier
+        data: Dictionary with 'tickers', 'price_data', 'company_info'
+        start: Start date
+        end: End date
+        interval: Data interval
+        
+    Returns:
+        Dictionary with transformed volatile data
     """
-
     start, end = _handle_start_end_dates(start, end)
 
     tickers = data["tickers"]
@@ -330,7 +373,9 @@ def load_volatile_data(
     si_filename = (
         f"data/historic_data/{'india' if market == 'india' else 'us'}/stock_info.csv"
     )
+    
     if not os.path.exists(si_filename):
+        os.makedirs(os.path.dirname(si_filename), exist_ok=True)
         with open(si_filename, "w") as file:
             wr = csv.writer(file)
             wr.writerow(si_columns)
@@ -344,35 +389,49 @@ def load_volatile_data(
     volatile_data = {}
 
     for ticker in tickers:
-        data_one = data["price_data"][ticker]
-        columns_to_copy = ["Adj Close", "Volume"]
-        data_one = data_one[columns_to_copy]
-        volatile_data[ticker] = data_one
+        try:
+            data_one = data["price_data"][ticker]
+            columns_to_copy = ["Adj Close", "Volume"]
+            data_one = data_one[columns_to_copy]
+            volatile_data[ticker] = data_one
 
-        if ticker in missing_tickers:
-            currencies[ticker] = "INR" if market == "india" else "USD"
-            sector_value = data["company_info"][ticker]["sector"]
-            if isinstance(sector_value, list):
-                sector_value = sector_value[0]
-            industry_value = data["company_info"][ticker]["industry"]
-            if isinstance(industry_value, list):
-                industry_value = industry_value[0]
-
-            if sector_value and industry_value:
-                missing_si[ticker] = {
-                    "sector": sector_value,
-                    "industry": industry_value,
-                }
+            if ticker in missing_tickers:
+                currencies[ticker] = "INR" if market == "india" else "USD"
+                
+                # Safely get sector/industry with fallbacks
+                company_info = data.get("company_info", {}).get(ticker, {})
+                sector_value = company_info.get("sector", "Unknown")
+                industry_value = company_info.get("industry", "Unknown")
+                
+                if isinstance(sector_value, list):
+                    sector_value = sector_value[0] if sector_value else "Unknown"
+                if isinstance(industry_value, list):
+                    industry_value = industry_value[0] if industry_value else "Unknown"
+                
+                if sector_value and industry_value:
+                    missing_si[ticker] = {
+                        "sector": sector_value,
+                        "industry": industry_value,
+                    }
+        except KeyError as e:
+            logger.warning(f"Missing data for {ticker}: {e}")
+            continue
 
     if not volatile_data:
         raise Exception("No symbol with full information is available.")
 
-    volatile_data = pd.concat(volatile_data.values(), keys=volatile_data.keys(), axis=1, sort=True)
+    volatile_data = pd.concat(
+        volatile_data.values(), keys=volatile_data.keys(), axis=1, sort=True
+    )
     volatile_data.drop(
-        columns=volatile_data.columns[volatile_data.isnull().sum(0) > 0.33 * volatile_data.shape[0]], inplace=True
+        columns=volatile_data.columns[
+            volatile_data.isnull().sum(0) > 0.33 * volatile_data.shape[0]
+        ],
+        inplace=True,
     )
     volatile_data = volatile_data.ffill().bfill().drop_duplicates()
 
+    # Save missing stock info
     info = zip(
         list(missing_si.keys()),
         [currencies[ticker] for ticker in missing_si.keys()],
@@ -395,13 +454,12 @@ def load_volatile_data(
 
     if missing_tickers:
         print(
-            "\nRemoving {} from list of symbols because we could not collect full information.".format(
-                missing_tickers
-            )
+            f"\nRemoving {len(missing_tickers)} symbols due to incomplete data: {missing_tickers[:5]}..."
         )
 
     currencies = [
-        si.get(ticker, {}).get("CURRENCY", currencies.get(ticker)) for ticker in tickers
+        si.get(ticker, {}).get("CURRENCY", currencies.get(ticker, "USD"))
+        for ticker in tickers
     ]
     ucurrencies, counts = np.unique(currencies, return_counts=True)
     default_currency = ucurrencies[np.argmax(counts)]
@@ -437,28 +495,18 @@ def get_exchange_rates(
     interval: str = "1d",
 ) -> dict:
     """
-    It finds the most common currency and set it as default one. For any other currency, it downloads exchange rate
-    closing prices to the default currency and return them as data frame.
-
-    Parameters
-    ----------
-    from_currencies: list
-        A list of currencies to convert.
-    to_currency: str
-        Currency to convert to.
-    dates: date
-        Dates for which exchange rates should be available.
-    start: str or int
-        Start download data from this timestamp date.
-    end: str or int
-        End download data at this timestamp date.
-    interval: str
-        Frequency between data.
-
-    Returns
-    -------
-    xrates: dict
-        A dictionary with currencies as keys and list of exchange rates at desired dates as values.
+    Download exchange rates for currency conversion.
+    
+    Args:
+        from_currencies: List of source currencies
+        to_currency: Target currency
+        dates: Date index for the rates
+        start: Start timestamp
+        end: End timestamp
+        interval: Data interval
+        
+    Returns:
+        Dictionary of exchange rates
     """
     start, end = _handle_start_end_dates(start, end)
     ucurrencies, counts = np.unique(from_currencies, return_counts=True)
@@ -469,20 +517,7 @@ def get_exchange_rates(
 
 
 def _process_exchange_rates(ucurrencies, to_currency, dates, start, end, interval):
-    """
-    Process exchange rates for given currencies and time period.
-
-    Args:
-        ucurrencies (list): List of currencies to process.
-        to_currency (str): The target currency to convert to.
-        dates (list): List of dates for the exchange rates.
-        start (str): Start date for the exchange rates.
-        end (str): End date for the exchange rates.
-        interval (str): Interval for the exchange rates.
-
-    Returns:
-        pandas.DataFrame: Processed exchange rates.
-    """
+    """Process exchange rates for given currencies."""
     tmp = {}
     if to_currency not in ucurrencies or len(ucurrencies) > 1:
         for curr in ucurrencies:
@@ -504,25 +539,7 @@ def _process_exchange_rates(ucurrencies, to_currency, dates, start, end, interva
 
 
 def _download_one(ticker: str, start: int, end: int, interval: str = "1d") -> dict:
-    """
-    Download historical data for a single ticker.
-
-    Parameters
-    ----------
-    ticker: str
-        Ticker for which to download historical information.
-    start: int
-        Start download data from this timestamp date.
-    end: int
-        End download data at this timestamp date.
-    interval: str
-        Frequency between data.
-
-    Returns
-    -------
-    data: dict
-        Scraped dictionary of information.
-    """
+    """Download historical data for a single ticker from Yahoo Finance API."""
     base_url = "https://query1.finance.yahoo.com"
     params = {
         "period1": start,
@@ -532,7 +549,9 @@ def _download_one(ticker: str, start: int, end: int, interval: str = "1d") -> di
     }
     url = f"{base_url}/v8/finance/chart/{ticker}"
     headers = {
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_11_5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/50.0.2661.102 Safari/537.36"
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_11_5) "
+                      "AppleWebKit/537.36 (KHTML, like Gecko) "
+                      "Chrome/50.0.2661.102 Safari/537.36"
     }
     response = requests.get(url, params=params, headers=headers)
     if "Will be right back" in response.text:
@@ -541,16 +560,7 @@ def _download_one(ticker: str, start: int, end: int, interval: str = "1d") -> di
 
 
 def _parse_quotes(data: dict, parse_volume: bool = True) -> pd.DataFrame:
-    """
-    Creates a data frame of adjusted closing prices, and optionally includes volume information.
-
-    Parameters
-    ----------
-    data: dict
-        Data containing historical information of corresponding stock.
-    parse_volume: bool
-        Include or not volume information in the data frame.
-    """
+    """Parse quotes from Yahoo Finance API response."""
     timestamps = data["timestamp"]
     ohlc = data["indicators"]["quote"][0]
     closes = ohlc["close"]
@@ -562,7 +572,7 @@ def _parse_quotes(data: dict, parse_volume: bool = True) -> pd.DataFrame:
         else closes
     )
 
-    # fix NaNs in the second-last entry of adjusted closing prices
+    # Fix NaNs in the second-last entry
     if adjclose[-2] is None:
         adjclose[-2] = adjclose[-1]
 

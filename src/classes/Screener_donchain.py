@@ -1,12 +1,15 @@
 import pandas as pd
 import yfinance as yf
-import pandas_ta as ta
+from ta.volatility import DonchianChannel
 import numpy as np
 
 
 def generate_donchain_signals(data, screening_period=5, low=20, high=20):
-    # calculate donchian channels
-    data[['don_low', 'don_mid', 'don_high']] = data.ta.donchian(lower_length=low, upper_length=high)
+    # calculate donchian channels using ta library
+    dc = DonchianChannel(high=data['High'], low=data['Low'], close=data['Close'], window=max(low, high))
+    data['don_low'] = dc.donchian_channel_lband()
+    data['don_mid'] = dc.donchian_channel_mband()
+    data['don_high'] = dc.donchian_channel_hband()
     
     # implement the trading strategy
     #data['long'] = ((data['Close']==data['low'])|(data['Low']==data['low'])).astype('int')

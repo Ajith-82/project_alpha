@@ -14,7 +14,11 @@ import keras
 import time
 import classes.Utility as Utility
 from copy import copy
-from advanced_ta import LorentzianClassification
+try:
+    from advanced_ta import LorentzianClassification
+    ADVANCED_TA_AVAILABLE = True
+except ImportError:
+    ADVANCED_TA_AVAILABLE = False
 from classes.Utility import isGui
 from sklearn.preprocessing import StandardScaler
 from scipy.signal import argrelextrema
@@ -547,6 +551,8 @@ class tools:
     # Validate Lorentzian Classification signal  
     def validateLorentzian(self, data, screenDict, saveDict, lookFor=1):
         # lookFor: 1-Any, 2-Buy, 3-Sell
+        if not ADVANCED_TA_AVAILABLE:
+            return False  # advanced_ta package not installed
         data = data[::-1]               # Reverse the dataframe
         data = data.rename(columns={'Open':'open', 'Close':'close', 'High':'high', 'Low':'low', 'Volume':'volume'})
         lc = LorentzianClassification(data=data)
