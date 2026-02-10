@@ -70,14 +70,9 @@ click.rich_click.OPTION_GROUPS = {
 
 from classes.Download import load_data, load_volatile_data
 from classes.Volatile import volatile
-from classes.Screener_ma import screener_ma
-from classes.Screener_macd import macd_screener
-from classes.Screener_donchain import donchain_screener
-from classes.Screener_breakout import breakout_screener
-from classes.Screener_trendline import trendline_screener
-from classes.Plot_stocks import create_plot_and_email_batched
-from classes.Send_email import send_email_volatile
-from classes.Console import (
+from classes.screeners import BreakoutScreener, TrendlineScreener
+from classes.output import (
+    create_batch_charts,
     console, print_banner, print_section, print_success, print_error,
     print_warning, print_info, print_summary_panel, print_config_panel,
     create_download_progress
@@ -294,7 +289,7 @@ def screener_value_charts(cache, market: str, index: str, symbols: list, db_path
     processed_data_dir = f"data/processed_data/{index}"
     os.makedirs(processed_data_dir, exist_ok=True)
     
-    create_plot_and_email_batched("IND_screener_value_stocks", market, value_symbols, price_data, processed_data_dir)
+    create_batch_charts("IND_screener_value_stocks", market, value_symbols, {"price_data": price_data}, processed_data_dir)
 
 
 def run_screening(args):
@@ -374,7 +369,57 @@ def run_screening(args):
         if not args.quiet:
             print_success(f"Identified {len(volatile_symbols_top)} high-volatility stocks")
             print_success(f"Identified {len(volatile_symbols_bottom)} low-volatility stocks")
+        
+        # Categorize stocks by trading signal interpretation
+        # 1. TREND (Momentum): High GROWTH + High VOLATILITY (top growth stocks)
+        # 2. VALUE (Mean-reversion): BELOW TREND or HIGHLY BELOW TREND (undervalued)
+        # 3. BREAKOUT: Low VOLATILITY + ALONG TREND (consolidating, ready to break)
+        
+        trend_candidates = volatile_df[
+            (volatile_df["GROWTH"] > 0.001) & 
+            (volatile_df["VOLATILITY"] > 0.10)
+        ]["SYMBOL"].head(50).tolist()
+        
+        value_candidates = volatile_df[
+            volatile_df["RATE"].isin(["BELOW TREND", "HIGHLY BELOW TREND"])
+        ]["SYMBOL"].head(50).tolist()
+        
+        breakout_candidates = volatile_df[
+            (volatile_df["RATE"] == "ALONG TREND") & 
+            (volatile_df["VOLATILITY"] < 0.15) &
+            (volatile_df["GROWTH"].abs() < 0.001)
+        ]["SYMBOL"].head(50).tolist()
+        
+        if not args.quiet:
+            print_info(f"Trading Categories: Trend={len(trend_candidates)}, Value={len(value_candidates)}, Breakout={len(breakout_candidates)}")
+        
+        # Generate plots for each trading category
+        if not args.no_plots:
+            # Trend/Momentum trading candidates
+            if trend_candidates:
+                trend_dir = "data/processed_data/volatile_trend_trading"
+                if not args.quiet:
+                    print_info(f"Generating {len(trend_candidates)} Trend/Momentum charts...")
+                create_batch_charts("Trend Trading", market, trend_candidates, data, trend_dir)
+            
+            # Value/Mean-reversion trading candidates
+            if value_candidates:
+                value_dir = "data/processed_data/volatile_value_trading"
+                if not args.quiet:
+                    print_info(f"Generating {len(value_candidates)} Value/Undervalued charts...")
+                create_batch_charts("Value Trading", market, value_candidates, data, value_dir)
+            
+            # Breakout trading candidates
+            if breakout_candidates:
+                breakout_dir = "data/processed_data/volatile_breakout_trading"
+                if not args.quiet:
+                    print_info(f"Generating {len(breakout_candidates)} Breakout charts...")
+                create_batch_charts("Breakout Trading", market, breakout_candidates, data, breakout_dir)
+        
         results["Volatility"] = len(volatile_symbols_top)
+        results["Trend_Candidates"] = len(trend_candidates)
+        results["Value_Candidates"] = len(value_candidates)
+        results["Breakout_Candidates"] = len(breakout_candidates)
     else:
         volatile_symbols_top = []
         volatile_symbols_bottom = []
@@ -386,8 +431,12 @@ def run_screening(args):
         
         breakout_screener_out_dir = "data/processed_data/screener_breakout"
         tickers_to_screen = volatile_symbols_bottom if volatile_symbols_bottom else data.get("tickers", [])
-        breakout_screener_out = breakout_screener(data, tickers_to_screen)
-        breakout_screener_out_symbols = breakout_screener_out["BUY"]
+        
+        # Use new modular screener
+        breakout_screener = BreakoutScreener()
+        price_data = data.get("price_data", {})
+        batch_result = breakout_screener.screen_batch(tickers_to_screen, price_data)
+        breakout_screener_out_symbols = [r.ticker for r in batch_result.buys]
         
         # Apply --top limit if specified
         if hasattr(args, 'top') and args.top and len(breakout_screener_out_symbols) > args.top:
@@ -395,7 +444,7 @@ def run_screening(args):
         
         if breakout_screener_out_symbols:
             if not args.no_plots:
-                create_plot_and_email_batched("Breakout screener", market, breakout_screener_out_symbols, data, breakout_screener_out_dir)
+                create_batch_charts("Breakout screener", market, breakout_screener_out_symbols, data, breakout_screener_out_dir)
             if args.save_table:
                 tools.save_screener_results_to_csv(market, "screener_breakout", breakout_screener_out_symbols)
             if not args.quiet:
@@ -414,8 +463,12 @@ def run_screening(args):
         trend_screener_history = "data/processed_data/screener_trend_history"
         
         tickers_to_screen = volatile_symbols_top if volatile_symbols_top else data.get("tickers", [])[:200]
-        trend_screener_out = trendline_screener(data, tickers_to_screen, screener_dur)
-        trend_screener_out_symbols = [ticker for ticker, _ in trend_screener_out['Trend']]
+        
+        # Use new modular screener
+        trend_screener = TrendlineScreener(lookback_days=screener_dur)
+        price_data = data.get("price_data", {})
+        batch_result = trend_screener.screen_batch(tickers_to_screen, price_data)
+        trend_screener_out_symbols = [r.ticker for r in batch_result.buys]
         
         # Apply --top limit if specified
         if hasattr(args, 'top') and args.top and len(trend_screener_out_symbols) > args.top:
@@ -423,7 +476,7 @@ def run_screening(args):
         
         if trend_screener_out_symbols:
             if not args.no_plots:
-                create_plot_and_email_batched("Trend screener", market, trend_screener_out_symbols, data, trend_screener_out_dir)
+                create_batch_charts("Trend screener", market, trend_screener_out_symbols, data, trend_screener_out_dir)
             if args.save_table:
                 trend_history_file = tools.save_screener_results_to_csv(market, "screener_trend", trend_screener_out_symbols)
             if not args.quiet:
@@ -434,7 +487,7 @@ def run_screening(args):
                 trend_common = tools.find_common_symbols(trend_history_file, 5)
                 if len(trend_common) > 0:
                     if not args.no_plots:
-                        create_plot_and_email_batched("Trending stocks in last 5 days", market, trend_common, data, trend_screener_history)
+                        create_batch_charts("Trending stocks in last 5 days", market, trend_common, data, trend_screener_history)
                     if not args.quiet:
                         print_success(f"Found {len(trend_common)} consistently trending stocks")
         else:

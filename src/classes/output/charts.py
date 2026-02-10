@@ -427,3 +427,247 @@ def create_stock_chart(
     else:
         builder.show()
         return None
+
+
+def create_batch_charts(
+    screener_name: str,
+    market: str,
+    symbols: List[str],
+    data: Dict[str, Any],
+    output_dir: str,
+    batch_size: int = 100,
+    send_email_flag: bool = True,
+) -> List[str]:
+    """
+    Create charts for multiple symbols in batches.
+    
+    This is the modular replacement for create_plot_and_email_batched.
+    
+    Args:
+        screener_name: Name of the screener (for email subject)
+        market: Market identifier ('us' or 'india')
+        symbols: List of stock symbols
+        data: Dictionary containing 'price_data' with DataFrames per symbol
+        output_dir: Base output directory
+        batch_size: Number of charts per batch
+        send_email_flag: Whether to send email notifications
+        
+    Returns:
+        List of paths to saved chart files
+    """
+    import math
+    import os
+    
+    saved_files = []
+    price_data = data.get("price_data", data)
+    
+    num_batches = math.ceil(len(symbols) / batch_size)
+    
+    for batch_idx in range(num_batches):
+        batch_symbols = symbols[batch_idx * batch_size : (batch_idx + 1) * batch_size]
+        batch_output_dir = f"{output_dir}_batch_{batch_idx}"
+        os.makedirs(batch_output_dir, exist_ok=True)
+        
+        for idx, symbol in enumerate(batch_symbols, start=1):
+            if symbol not in price_data:
+                logger.warning(f"No data for {symbol}, skipping")
+                continue
+            
+            df = price_data[symbol]
+            if df is None or df.empty:
+                continue
+            
+            # Use last 200 bars
+            df = df.tail(200).copy()
+            
+            # Create chart with all indicators
+            chart_path = _create_full_chart(
+                ticker=symbol,
+                data=df,
+                output_path=f"{batch_output_dir}/{idx}_{symbol}.svg",
+                market=market,
+            )
+            
+            if chart_path:
+                saved_files.append(chart_path)
+        
+        # Send email for batch if enabled
+        if send_email_flag:
+            try:
+                from classes.output.email import EmailConfig, EmailServer
+                config_path = "email_config.json"
+                if os.path.exists(config_path):
+                    config = EmailConfig.from_json(config_path)
+                    server = EmailServer(config)
+                    
+                    # Collect SVG files
+                    svg_files = [f for f in os.listdir(batch_output_dir) if f.endswith('.svg')]
+                    if svg_files:
+                        attachments = [os.path.join(batch_output_dir, f) for f in svg_files]
+                        server.send_with_attachments(
+                            subject=f"{screener_name} - {market.upper()} Batch {batch_idx + 1}",
+                            message=f"<h2>{screener_name} Results</h2><p>{len(svg_files)} charts attached.</p>",
+                            attachments=attachments,
+                            mock=True,  # Set to False in production
+                        )
+            except FileNotFoundError:
+                logger.debug("Email config not found, skipping email")
+            except Exception as e:
+                logger.warning(f"Email failed: {e}")
+    
+    logger.info(f"Created {len(saved_files)} charts in {output_dir}")
+    return saved_files
+
+
+def _create_full_chart(
+    ticker: str,
+    data: pd.DataFrame,
+    output_path: str,
+    market: str = "us",
+) -> Optional[str]:
+    """
+    Create a full stock chart with all indicators (SMA, Donchian, Volume, MACD, RSI).
+    
+    Args:
+        ticker: Stock symbol
+        data: Price data DataFrame
+        output_path: Path to save the chart
+        market: Market identifier
+        
+    Returns:
+        Path to saved file or None
+    """
+    if not PLOTLY_AVAILABLE:
+        logger.warning("Plotly not available")
+        return None
+    
+    try:
+        import plotly.io as pio
+        
+        # Get TradingView recommendation if available
+        recommendation_str = ""
+        try:
+            import classes.Tools as tools
+            recommendation = tools.tradingview_recommendation(ticker, market)
+            recommendation_str = ' '.join(recommendation)
+        except Exception:
+            pass
+        
+        # Build date breaks for non-trading days
+        dt_all = pd.date_range(start=data.index[0], end=data.index[-1])
+        dt_obs = [d.strftime("%Y-%m-%d") for d in pd.to_datetime(data.index)]
+        dt_breaks = [d for d in dt_all.strftime("%Y-%m-%d").tolist() if d not in dt_obs]
+        
+        # Create 4-row subplot
+        fig = make_subplots(
+            rows=4,
+            cols=1,
+            vertical_spacing=0.01,
+            shared_xaxes=True,
+            row_heights=(2, 0.5, 1, 1),
+        )
+        
+        # Row 1: Price with SMAs
+        for col in ["Close", "SMA_10", "SMA_30", "SMA_50", "SMA_200"]:
+            if col in data.columns:
+                fig.add_trace(
+                    go.Scatter(x=data.index, y=data[col], name=col),
+                    row=1, col=1
+                )
+        
+        # Add Donchian channels
+        _add_donchian_to_chart(fig, data)
+        
+        # Row 2: Volume
+        colors = [
+            "#9C1F0B" if row["Open"] - row["Close"] >= 0 else "#2B8308"
+            for _, row in data.iterrows()
+        ]
+        fig.add_trace(
+            go.Bar(x=data.index, y=data["Volume"], showlegend=False, marker_color=colors),
+            row=2, col=1
+        )
+        
+        # Row 3: MACD
+        if all(col in data.columns for col in ["MACD", "MACD_signal", "MACD_hist"]):
+            macd_colors = ["green" if v >= 0 else "red" for v in data["MACD_hist"]]
+            fig.add_trace(
+                go.Bar(x=data.index, y=data["MACD_hist"], showlegend=False, marker_color=macd_colors),
+                row=3, col=1
+            )
+            fig.add_trace(
+                go.Scatter(x=data.index, y=data["MACD"], name="MACD", line=dict(color="black", width=2)),
+                row=3, col=1
+            )
+            fig.add_trace(
+                go.Scatter(x=data.index, y=data["MACD_signal"], name="Signal", line=dict(color="blue", width=1)),
+                row=3, col=1
+            )
+        
+        # Row 4: RSI
+        if "RSI" in data.columns:
+            fig.add_trace(
+                go.Scatter(x=data.index, y=data["RSI"], name="RSI", line=dict(color="purple", width=2)),
+                row=4, col=1
+            )
+            fig.add_hline(y=30, line_dash="dash", line_color="green", opacity=0.5, row=4, col=1)
+            fig.add_hline(y=70, line_dash="dash", line_color="red", opacity=0.5, row=4, col=1)
+            fig.update_yaxes(range=[0, 100], row=4, col=1)
+        
+        # Y-axis labels
+        fig.update_yaxes(title_text="Price", row=1, col=1)
+        fig.update_yaxes(title_text="Volume", row=2, col=1)
+        fig.update_yaxes(title_text="MACD", row=3, col=1)
+        fig.update_yaxes(title_text="RSI", row=4, col=1)
+        
+        # Remove weekends/holidays
+        fig.update_xaxes(tickangle=45, rangebreaks=[dict(values=dt_breaks)])
+        
+        # Layout
+        title_suffix = f" - {recommendation_str}" if recommendation_str else ""
+        fig.update_layout(
+            template="seaborn",
+            title=f"{ticker}{title_suffix}",
+            height=900,
+            width=1200,
+            legend_title="Legend",
+            margin=dict(r=10, b=10),
+        )
+        
+        # Save
+        Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+        pio.write_image(fig, output_path, format="svg")
+        
+        return output_path
+        
+    except Exception as e:
+        logger.error(f"Error creating chart for {ticker}: {e}")
+        return None
+
+
+def _add_donchian_to_chart(fig: go.Figure, data: pd.DataFrame, window: int = 20):
+    """Add Donchian channel bands to chart."""
+    try:
+        from ta.volatility import DonchianChannel
+        donchian = DonchianChannel(high=data["High"], low=data["Low"], close=data["Close"], window=window)
+        don_high = donchian.donchian_channel_hband()
+        don_mid = donchian.donchian_channel_mband()
+        don_low = donchian.donchian_channel_lband()
+    except ImportError:
+        don_high = data["High"].rolling(window=window).max()
+        don_low = data["Low"].rolling(window=window).min()
+        don_mid = (don_high + don_low) / 2
+    
+    fig.add_trace(
+        go.Scatter(x=data.index, y=don_high, name="Don High", line=dict(color="red", width=2, dash="dash")),
+        row=1, col=1
+    )
+    fig.add_trace(
+        go.Scatter(x=data.index, y=don_mid, name="Don Mid", line=dict(color="blue", width=2, dash="dash")),
+        row=1, col=1
+    )
+    fig.add_trace(
+        go.Scatter(x=data.index, y=don_low, name="Don Low", line=dict(color="purple", width=2, dash="dash")),
+        row=1, col=1
+    )
+

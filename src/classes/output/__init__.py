@@ -49,6 +49,7 @@ from .charts import (
     ChartConfig,
     ChartBuilder,
     create_stock_chart,
+    create_batch_charts,
 )
 
 
@@ -94,4 +95,5 @@ __all__ = [
     "ChartConfig",
     "ChartBuilder",
     "create_stock_chart",
+    "create_batch_charts",
 ]
