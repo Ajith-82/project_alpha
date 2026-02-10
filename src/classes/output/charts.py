@@ -490,8 +490,8 @@ def create_batch_charts(
             
             if chart_path:
                 saved_files.append(chart_path)
-        
-        # Send email for batch if enabled
+                
+        # Prepare data for email report
         if send_email_flag:
             try:
                 from classes.output.email import EmailConfig, EmailServer
@@ -500,16 +500,53 @@ def create_batch_charts(
                     config = EmailConfig.from_json(config_path)
                     server = EmailServer(config)
                     
-                    # Collect SVG files
-                    svg_files = [f for f in os.listdir(batch_output_dir) if f.endswith('.svg')]
-                    if svg_files:
-                        attachments = [os.path.join(batch_output_dir, f) for f in svg_files]
-                        server.send_with_attachments(
-                            subject=f"{screener_name} - {market.upper()} Batch {batch_idx + 1}",
-                            message=f"<h2>{screener_name} Results</h2><p>{len(svg_files)} charts attached.</p>",
-                            attachments=attachments,
-                            mock=True,  # Set to False in production
+                    # Collect charts and summary data
+                    chart_files = []
+                    summary_data = []
+                    
+                    # Process top 10 for detailed summary and PNG generation
+                    top_symbols = batch_symbols[:10]
+                    
+                    for symbol in top_symbols:
+                        if symbol not in price_data: continue
+                        df = price_data[symbol]
+                        if df.empty: continue
+                        
+                        # Calculate change
+                        last_close = df["Close"].iloc[-1]
+                        prev_close = df["Close"].iloc[-2]
+                        change_pct = ((last_close - prev_close) / prev_close) * 100
+                        
+                        # Get Sector (if available in data["sectors"])
+                        sector = data.get("sectors", {}).get(symbol, "N/A")
+                        
+                        summary_data.append({
+                            "symbol": symbol,
+                            "price": f"{last_close:.2f}",
+                            "change": change_pct,
+                            "sector": sector
+                        })
+                        
+                        # Generate PNG for embedding (Plotly write_image requires kaleido)
+                        png_path = f"{batch_output_dir}/{symbol}.png"
+                        try:
+                            _create_full_chart(symbol, df.tail(200), png_path, market)
+                            if os.path.exists(png_path):
+                                chart_files.append(png_path)
+                        except Exception as e:
+                            logger.warning(f"Failed to create PNG for {symbol}: {e}")
+
+                    # Send the rich report
+                    if summary_data:
+                        server.send_stock_report_email(
+                            subject=f"{screener_name} - {market.upper()} Report (Batch {batch_idx + 1})",
+                            market=market,
+                            category=screener_name,
+                            summary_data=summary_data,
+                            charts=chart_files,
+                            mock=False # Set to False in production
                         )
+                        
             except FileNotFoundError:
                 logger.debug("Email config not found, skipping email")
             except Exception as e:
