@@ -159,6 +159,7 @@ class EmailServer:
         category: str,
         summary_data: List[Dict[str, Any]],
         charts: List[str],
+        pdf_path: Optional[str] = None,
         recipients: Optional[List[str]] = None,
         mock: bool = True,
     ) -> bool:
@@ -309,9 +310,19 @@ class EmailServer:
                     )
                     attachment["Content-Disposition"] = f'attachment; filename="{filename}"'
                     msg.attach(attachment)
+
+                # Attach PDF Report
+                if pdf_path and os.path.exists(pdf_path):
+                    with open(pdf_path, "rb") as f:
+                        pdf_data = f.read()
+                    
+                    pdf_filename = os.path.basename(pdf_path)
+                    pdf_attachment = MIMEApplication(pdf_data, _subtype="pdf")
+                    pdf_attachment.add_header('Content-Disposition', 'attachment', filename=pdf_filename)
+                    msg.attach(pdf_attachment)
                 
                 if mock:
-                    logger.info(f"Mock: Would send report to {recipient} with {len(embedded_charts)} inline charts + CSV")
+                    logger.info(f"Mock: Would send report to {recipient} with {len(embedded_charts)} inline charts + CSV + PDF")
                 else:
                     self._connect().sendmail(
                         msg["From"],

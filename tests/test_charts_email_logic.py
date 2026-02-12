@@ -41,6 +41,14 @@ try:
         send_email_flag=True
     )
     print("create_batch_charts completed successfully!")
+    
+    # Verify PDF creation
+    expected_pdf = os.path.join(output_dir + "_batch_0", "Test Screener_Report.pdf")
+    if os.path.exists(expected_pdf):
+        print(f"SUCCESS: PDF Report generated at {expected_pdf}")
+    else:
+        print(f"FAILURE: PDF Report NOT found at {expected_pdf}")
+        
 except Exception as e:
     print(f"create_batch_charts FAILED: {e}")
     import traceback

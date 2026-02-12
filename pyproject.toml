@@ -41,6 +41,7 @@ dependencies = [
     
     # Utilities
     "multitasking>=0.0.11",
+    "reportlab (>=4.4.9,<5.0.0)",
 ]
 
 [project.optional-dependencies]

@@ -522,35 +522,43 @@ def create_batch_charts(
                             "sector": sector
                         })
 
-                    # Generate PNGs only for top 10 for embedding
+                    # Generate PNGs for ALL symbols for PDF report
                     chart_files = []
-                    top_symbols = batch_symbols[:10]
                     
-                    for symbol in top_symbols:
+                    for symbol in batch_symbols:
                         if symbol not in price_data: continue
                         df = price_data[symbol]
                         if df is None or df.empty: continue
 
-                        # Generate PNG for embedding (Plotly write_image requires kaleido)
+                        # Generate PNG for PDF/Embedding
                         png_path = f"{batch_output_dir}/{symbol}.png"
                         try:
+                            # Use full chart with all indicators
                             _create_full_chart(symbol, df.tail(200), png_path, market)
                             if os.path.exists(png_path):
                                 chart_files.append(png_path)
                         except Exception as e:
                             logger.warning(f"Failed to create PNG for {symbol}: {e}")
+                    
+                    # Generate PDF Report
+                    pdf_path = f"{batch_output_dir}/{screener_name}_Report.pdf"
+                    _generate_pdf_report(market, screener_name, summary_data, chart_files, pdf_path)
 
                     # Send the rich report
                     if summary_data:
                         # Sort summary data by change % descending for the report
                         summary_data.sort(key=lambda x: x['change'], reverse=True)
                         
+                        # Use top 5 for inline embedding, attach PDF for full view
+                        embedded_charts = chart_files[:5]
+                        
                         server.send_stock_report_email(
                             subject=f"{screener_name} - {market.upper()} Report (Batch {batch_idx + 1})",
                             market=market,
                             category=screener_name,
                             summary_data=summary_data,
-                            charts=chart_files,
+                            charts=embedded_charts,
+                            pdf_path=pdf_path,
                             mock=False # Set to False in production
                         )
                         
@@ -717,4 +725,125 @@ def _add_donchian_to_chart(fig: go.Figure, data: pd.DataFrame, window: int = 20)
         go.Scatter(x=data.index, y=don_low, name="Don Low", line=dict(color="purple", width=2, dash="dash")),
         row=1, col=1
     )
+
+
+def _generate_pdf_report(
+    market: str,
+    screener_name: str,
+    summary_data: List[Dict[str, Any]],
+    chart_files: List[str],
+    output_path: str,
+) -> Optional[str]:
+    """
+    Generate a PDF report with summary table and charts.
+    
+    Args:
+        market: Market name
+        screener_name: Screener name
+        summary_data: List of summary dicts
+        chart_files: List of paths to chart images
+        output_path: Path to save PDF
+        
+    Returns:
+        Path to saved PDF or None
+    """
+    try:
+        from reportlab.lib.pagesizes import letter, landscape
+        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image, Table, TableStyle, PageBreak
+        from reportlab.lib import colors
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.lib.units import inch
+        import datetime as dt
+        
+        doc = SimpleDocTemplate(
+            output_path,
+            pagesize=letter,
+            rightMargin=36,
+            leftMargin=36,
+            topMargin=36,
+            bottomMargin=18
+        )
+        
+        styles = getSampleStyleSheet()
+        elements = []
+        
+        # Title Page
+        title_style = styles["Title"]
+        elements.append(Paragraph(f"{screener_name.title()} Report - {market.upper()}", title_style))
+        elements.append(Paragraph(f"Date: {dt.datetime.now().strftime('%Y-%m-%d')}", styles["Normal"]))
+        elements.append(Spacer(1, 0.5 * inch))
+        
+        # Summary Table (Top 30 to fit on page)
+        if summary_data:
+            elements.append(Paragraph("Market Summary (Top 30)", styles["Heading2"]))
+            
+            # Prepare data for table
+            table_data = [["Symbol", "Price", "Change %", "Sector"]]
+            for item in summary_data[:30]:
+                change_str = f"{item['change']:.2f}%"
+                if item['change'] > 0: change_str = "+" + change_str
+                table_data.append([
+                    item['symbol'],
+                    item['price'],
+                    change_str,
+                    item.get('sector', 'N/A')
+                ])
+                
+            t = Table(table_data, colWidths=[1.5*inch, 1*inch, 1*inch, 2.5*inch])
+            t.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor("#3498db")),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+                ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+                ('GRID', (0, 0), (-1, -1), 1, colors.black),
+            ]))
+            elements.append(t)
+            
+            if len(summary_data) > 30:
+                elements.append(Spacer(1, 0.2 * inch))
+                elements.append(Paragraph(f"...and {len(summary_data) - 30} more in attached CSV", styles["Italic"]))
+        
+        elements.append(PageBreak())
+        
+        # Charts Pages
+        for chart_path in chart_files:
+            if not os.path.exists(chart_path): continue
+            
+            # Extract ticker from filename
+            filename = os.path.basename(chart_path)
+            ticker = os.path.splitext(filename)[0]
+            
+            elements.append(Paragraph(f"{ticker} Analysis", styles["Heading2"]))
+            
+            # Add Image (resize to fit page max width/height)
+            try:
+                img = Image(chart_path)
+                # Max dimensions for letter page with margins
+                max_width = 7 * inch
+                max_height = 8 * inch
+                
+                # Get original dimensions (if possible via utils, otherwise assume huge and scale down)
+                # Reportlab Image typically reads size automatically.
+                
+                # We force aspect ratio preservation if we can, but simple scaling is safer:
+                img.drawHeight = 5 * inch 
+                img.drawWidth = 7 * inch
+                
+                elements.append(img)
+                elements.append(PageBreak())
+            except Exception as e:
+                logger.warning(f"Could not add chart {chart_path} to PDF: {e}")
+            
+        doc.build(elements)
+        logger.info(f"PDF Report saved to {output_path}")
+        return output_path
+        
+    except ImportError:
+        logger.warning("reportlab not installed, skipping PDF generation")
+        return None
+    except Exception as e:
+        logger.error(f"Failed to generate PDF report: {e}")
+        return None
 
