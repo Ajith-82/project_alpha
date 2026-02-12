@@ -206,7 +206,7 @@ class EmailServer:
                     <tbody>
         """
         
-        for item in summary_data:
+        for item in summary_data[:20]:
             change_color = "green" if item['change'] >= 0 else "red"
             change_str = f"{item['change']:.2f}%"
             if item['change'] > 0: change_str = "+" + change_str
@@ -219,6 +219,15 @@ class EmailServer:
                             <td style="padding: 10px;">{item.get('sector', 'N/A')}</td>
                         </tr>
             """
+            
+        if len(summary_data) > 20:
+             html_body += f"""
+                        <tr>
+                            <td colspan="4" style="padding: 10px; text-align: center; color: #7f8c8d; font-style: italic;">
+                                ...and {len(summary_data) - 20} more items in the attached CSV...
+                            </td>
+                        </tr>
+             """
             
         html_body += """
                     </tbody>
@@ -246,43 +255,63 @@ class EmailServer:
         </html>
         """
 
+        # Build CSV for attachment
+        csv_buffer = StringIO()
+        if summary_data:
+            df = pd.DataFrame(summary_data)
+            df.to_csv(csv_buffer, index=False)
+        
         for recipient in recipients:
             try:
-                msg = MIMEMultipart("related")
+                # Root is mixed: contains related (body+images) AND attachments (CSV)
+                msg = MIMEMultipart("mixed")
                 msg["Subject"] = subject
                 msg["From"] = self.config.sender_id
                 msg["To"] = recipient
                 
-                msg_alternative = MIMEMultipart("alternative")
-                msg.attach(msg_alternative)
+                # Create the related part for HTML + Inline Images
+                msg_related = MIMEMultipart("related")
+                msg.attach(msg_related)
                 
+                # Alternative part for HTML text
+                msg_alternative = MIMEMultipart("alternative")
+                msg_related.attach(msg_alternative)
                 msg_alternative.attach(MIMEText(html_body, "html"))
                 
-                # Embed images
+                # Embed images into the related part
                 for i, chart_path in enumerate(embedded_charts):
                     if not os.path.exists(chart_path): continue
                     
                     with open(chart_path, "rb") as f:
                         img_data = f.read()
                         
-                    # Try to guess MIME type or default to png since we generate pngs
+                    # Try to guess MIME type or default to png
                     ctype, encoding = mimetypes.guess_type(chart_path)
                     if ctype is None or encoding is not None:
-                        # No guess could be made, or the file is encoded (compressed), so
-                        # use a generic bag-of-bits type.
                         ctype = 'application/octet-stream'
                     
                     maintype, subtype = ctype.split('/', 1)
                     if maintype != 'image':
-                        subtype = 'png' # Force PNG if not detected as image
+                        subtype = 'png'
 
                     img = MIMEImage(img_data, _subtype=subtype)
                     img.add_header("Content-ID", f"<chart_{i}>")
                     img.add_header("Content-Disposition", "inline", filename=os.path.basename(chart_path))
-                    msg.attach(img)
+                    msg_related.attach(img)
+                    
+                # Attach CSV to the mixed root
+                if summary_data:
+                    timestamp = dt.datetime.now().strftime("%Y%m%d")
+                    filename = f"stock_report_{market}_{category}_{timestamp}.csv"
+                    attachment = MIMEApplication(
+                        csv_buffer.getvalue().encode('utf-8'),
+                        Name=filename,
+                    )
+                    attachment["Content-Disposition"] = f'attachment; filename="{filename}"'
+                    msg.attach(attachment)
                 
                 if mock:
-                    logger.info(f"Mock: Would send report to {recipient} with {len(embedded_charts)} inline charts")
+                    logger.info(f"Mock: Would send report to {recipient} with {len(embedded_charts)} inline charts + CSV")
                 else:
                     self._connect().sendmail(
                         msg["From"],

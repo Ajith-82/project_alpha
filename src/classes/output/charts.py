@@ -500,17 +500,12 @@ def create_batch_charts(
                     config = EmailConfig.from_json(config_path)
                     server = EmailServer(config)
                     
-                    # Collect charts and summary data
-                    chart_files = []
+                    # Collect summary data for ALL symbols
                     summary_data = []
-                    
-                    # Process top 10 for detailed summary and PNG generation
-                    top_symbols = batch_symbols[:10]
-                    
-                    for symbol in top_symbols:
+                    for symbol in batch_symbols:
                         if symbol not in price_data: continue
                         df = price_data[symbol]
-                        if df.empty: continue
+                        if df is None or df.empty: continue
                         
                         # Calculate change
                         last_close = df["Close"].iloc[-1]
@@ -526,7 +521,16 @@ def create_batch_charts(
                             "change": change_pct,
                             "sector": sector
                         })
-                        
+
+                    # Generate PNGs only for top 10 for embedding
+                    chart_files = []
+                    top_symbols = batch_symbols[:10]
+                    
+                    for symbol in top_symbols:
+                        if symbol not in price_data: continue
+                        df = price_data[symbol]
+                        if df is None or df.empty: continue
+
                         # Generate PNG for embedding (Plotly write_image requires kaleido)
                         png_path = f"{batch_output_dir}/{symbol}.png"
                         try:
@@ -538,6 +542,9 @@ def create_batch_charts(
 
                     # Send the rich report
                     if summary_data:
+                        # Sort summary data by change % descending for the report
+                        summary_data.sort(key=lambda x: x['change'], reverse=True)
+                        
                         server.send_stock_report_email(
                             subject=f"{screener_name} - {market.upper()} Report (Batch {batch_idx + 1})",
                             market=market,
@@ -673,7 +680,10 @@ def _create_full_chart(
         
         # Save
         Path(output_path).parent.mkdir(parents=True, exist_ok=True)
-        pio.write_image(fig, output_path, format="svg")
+        # Infer format from extension (e.g. .png -> png)
+        ext = Path(output_path).suffix.lower()
+        fmt = ext[1:] if ext else "svg"
+        pio.write_image(fig, output_path, format=fmt)
         
         return output_path
         
