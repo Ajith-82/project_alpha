@@ -8,6 +8,8 @@ from dataclasses import dataclass, field
 from typing import Dict, Optional
 
 
+from config.settings import settings
+
 @dataclass
 class RatingThresholds:
     """Thresholds for stock rating based on z-scores."""
@@ -29,13 +31,13 @@ class RatingThresholds:
 @dataclass
 class TrainingConfig:
     """Configuration for model training."""
-    learning_rate: float = 0.01
-    correlation_steps: int = 50000  # Steps for correlation model
-    trend_steps: int = 10000  # Steps for trend model
+    learning_rate: float = settings.learning_rate
+    correlation_steps: int = settings.correlation_steps  # Steps for correlation model
+    trend_steps: int = settings.trend_steps  # Steps for trend model
     
     # Polynomial orders
-    order_correlation: int = 52  # High-frequency patterns
-    order_trend: int = 2  # Quadratic trend fitting
+    order_correlation: int = settings.correlation_order  # High-frequency patterns
+    order_trend: int = settings.model_order  # Quadratic trend fitting
 
 
 @dataclass

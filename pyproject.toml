@@ -42,14 +42,28 @@ dependencies = [
     # Utilities
     "multitasking>=0.0.11",
     "reportlab (>=4.4.9,<5.0.0)",
+    
+    # Phase 1: Foundation
+    "pydantic-settings>=2.0.0",
+    "structlog>=24.0.0",
+    "backtesting>=0.3.3",
+    "pyfolio-reloaded>=0.9.5",
+    "pydantic (>=2.12.5,<3.0.0)",
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0.0",
     "pytest-cov>=4.0.0",
+    "pytest-mock>=3.10.0",
 ]
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]
 build-backend = "poetry.core.masonry.api"
+
+[dependency-groups]
+dev = [
+    "pytest-cov (>=7.0.0,<8.0.0)",
+    "pytest-mock (>=3.15.1,<4.0.0)"
+]

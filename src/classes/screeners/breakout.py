@@ -7,6 +7,7 @@ Screens stocks for breakout patterns based on volume and price action.
 import numpy as np
 import pandas as pd
 
+from config.settings import settings
 from .base import BaseScreener, ScreenerResult, Signal
 
 
@@ -26,10 +27,10 @@ class BreakoutScreener(BaseScreener):
     def __init__(
         self,
         lookback_days: int = 5,
-        min_avg_volume: int = 100000,
-        oc_threshold: float = 100.0,
-        volume_threshold: float = 50.0,
-        selling_pressure_max: float = 0.40,
+        min_avg_volume: int = settings.min_volume,
+        oc_threshold: float = settings.breakout_oc_threshold,
+        volume_threshold: float = settings.breakout_volume_threshold,
+        selling_pressure_max: float = settings.breakout_selling_pressure_max,
     ):
         """
         Initialize breakout screener.

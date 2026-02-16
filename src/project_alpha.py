@@ -20,6 +20,9 @@ Examples:
 """
 
 import os
+import structlog
+from datetime import datetime
+import pandas as pd
 
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
 os.environ["OMP_NUM_THREADS"] = "4"
@@ -62,6 +65,14 @@ click.rich_click.OPTION_GROUPS = {
             "options": ["--load-model", "--save-model"],
         },
         {
+            "name": "Risk Management",
+            "options": ["--risk-per-trade", "--atr-multiplier", "--max-positions"],
+        },
+        {
+            "name": "Backtesting",
+            "options": ["--backtest", "--initial-capital", "--benchmark"],
+        },
+        {
             "name": "Additional Features",
             "options": ["--value"],
         },
@@ -71,6 +82,8 @@ click.rich_click.OPTION_GROUPS = {
 from classes.Download import load_data, load_volatile_data
 from classes.Volatile import volatile
 from classes.screeners import BreakoutScreener, TrendlineScreener
+from classes.backtesting.engine import BacktestEngine, ProjectAlphaStrategy
+from classes.backtesting.performance import BacktestPerformance
 from classes.output import (
     create_batch_charts,
     console, print_banner, print_section, print_success, print_error,
@@ -79,6 +92,8 @@ from classes.output import (
 )
 import classes.IndexListFetcher as Index
 import classes.Tools as tools
+from config.settings import settings
+from logging_config import configure_logging
 
 
 # Available screeners
@@ -102,7 +117,7 @@ def validate_screeners(ctx, param, value):
 @click.option(
     "-m", "--market",
     type=click.Choice(["us", "india"], case_sensitive=False),
-    default="us",
+    default=settings.market,
     show_default=True,
     help="Market to analyze. **us** = S&P 500, **india** = NSE 500",
 )
@@ -188,6 +203,18 @@ def validate_screeners(ctx, param, value):
     help="Minimal output (errors only)",
 )
 @click.option(
+    "--json-logs",
+    is_flag=True,
+    default=False,
+    help="Output logs in JSON format",
+)
+@click.option(
+    "--log-level",
+    type=click.Choice(["DEBUG", "INFO", "WARNING", "ERROR"], case_sensitive=False),
+    default="INFO",
+    help="Set log level",
+)
+@click.option(
     "--no-banner",
     is_flag=True,
     default=False,
@@ -226,10 +253,47 @@ def validate_screeners(ctx, param, value):
     default=False,
     help="Include value stocks from external screener sources (India only)",
 )
+@click.option(
+    "--risk-per-trade",
+    type=float,
+    default=settings.risk_per_trade,
+    help="Risk per trade (decimal, e.g., 0.01 for 1%)",
+)
+@click.option(
+    "--atr-multiplier",
+    type=float,
+    default=settings.atr_multiplier,
+    help="ATR multiplier for stop-loss calculation",
+)
+@click.option(
+    "--max-positions",
+    type=int,
+    default=settings.max_positions,
+    help="Maximum number of concurrent open positions",
+)
+@click.option(
+    "--backtest",
+    is_flag=True,
+    default=False,
+    help="Run backtest on selected symbols/market",
+)
+@click.option(
+    "--initial-capital",
+    type=float,
+    default=10000.0,
+    help="Initial capital for backtest",
+)
+@click.option(
+    "--benchmark",
+    type=str,
+    default="SPY",
+    help="Benchmark symbol for comparison",
+)
 @click.version_option(version="0.1.0", prog_name="Project Alpha")
 def cli(market, symbols, screeners, rank, top, min_price, max_price, output_format,
-        save_table, no_plots, plot_losses, verbose, quiet, no_banner, cache,
-        db_path, load_model, save_model, value):
+        save_table, no_plots, plot_losses, verbose, quiet, json_logs, log_level, no_banner, cache,
+        db_path, load_model, save_model, value, risk_per_trade, atr_multiplier, max_positions,
+        backtest, initial_capital, benchmark):
     """
     🚀 **Project Alpha** - Your Day-to-Day Trading Companion
     
@@ -243,9 +307,15 @@ def cli(market, symbols, screeners, rank, top, min_price, max_price, output_form
     
     **Quick Start:**
     
-        $ python project_alpha.py --market us
-        $ python project_alpha.py --market india --screeners volatility,trend
     """
+    # Configure logging
+    if verbose:
+        log_level = "DEBUG"
+    elif quiet:
+        log_level = "WARNING"
+    
+    configure_logging(level=log_level, json_output=json_logs)
+    
     # Create args namespace for backward compatibility
     class Args:
         pass
@@ -270,6 +340,13 @@ def cli(market, symbols, screeners, rank, top, min_price, max_price, output_form
     args.load_model = load_model
     args.save_model = save_model
     args.value = value
+    args.risk_per_trade = risk_per_trade
+    args.atr_multiplier = atr_multiplier
+    args.max_positions = max_positions
+    args.backtest = backtest
+    args.initial_capital = initial_capital
+    args.benchmark = benchmark
+    args.settings = settings
     
     # Run main with enhanced args
     run_screening(args)
@@ -277,7 +354,7 @@ def cli(market, symbols, screeners, rank, top, min_price, max_price, output_form
 
 def screener_value_charts(cache, market: str, index: str, symbols: list, db_path: str = None):
     """Generate value stock charts for a given market and symbols."""
-    historic_data_dir = f"data/historic_data/{market}"
+    historic_data_dir = os.path.join(settings.data_dir, "historic_data", market)
     os.makedirs(historic_data_dir, exist_ok=True)
     
     file_prefix = f"{index}_data"
@@ -286,7 +363,7 @@ def screener_value_charts(cache, market: str, index: str, symbols: list, db_path
     price_data = data["price_data"]
     value_symbols = data["tickers"]
     
-    processed_data_dir = f"data/processed_data/{index}"
+    processed_data_dir = os.path.join(settings.data_dir, "processed_data", index)
     os.makedirs(processed_data_dir, exist_ok=True)
     
     create_batch_charts("IND_screener_value_stocks", market, value_symbols, {"price_data": price_data}, processed_data_dir)
@@ -311,7 +388,7 @@ def run_screening(args):
     screeners_to_run = args.screeners if hasattr(args, 'screeners') else ["all"]
     
     # Cleanup report directories
-    tools.cleanup_directory_files("data/processed_data")
+    tools.cleanup_directory_files(os.path.join(settings.data_dir, "processed_data"))
     if not args.quiet:
         print_success("Cleaned up previous report directories")
     
@@ -334,10 +411,19 @@ def run_screening(args):
             print_info(f"Loading S&P 500 index ({len(symbols)} stocks)")
 
     # Create data directories
-    data_dir = f"data/historic_data/{market}"
+    data_dir = os.path.join(settings.data_dir, "historic_data", market)
     os.makedirs(data_dir, exist_ok=True)
     
     file_prefix = f"{index}_data"
+    
+    # Optimization: If specific symbols requested, only load/download those
+    if args.symbols and len(args.symbols) > 0:
+        symbols = args.symbols
+        # Use a different prefix to avoid overwriting the full market cache
+        file_prefix = f"{index}_custom_{len(symbols)}_data"
+        if not args.quiet:
+            print_info(f"Analyzing {len(symbols)} specific symbols: {', '.join(symbols[:5])}...")
+    
     data = load_data(cache, symbols, market, file_prefix, data_dir, db_path=db_path)
     
     total_stocks = len(data.get("tickers", []))
@@ -354,6 +440,110 @@ def run_screening(args):
     
     # Determine which screeners to run
     run_all = "all" in screeners_to_run
+
+    # Backtesting Mode
+    if getattr(args, 'backtest', False):
+        if not args.quiet:
+            print_section("Backtesting Mode", "🧪")
+        
+        backtest_results = []
+        
+        # Determine which screener to backtest
+        screener_cls = BreakoutScreener
+        if "trend" in screeners_to_run and "breakout" not in screeners_to_run:
+            screener_cls = TrendlineScreener
+            
+        tickers = data.get("tickers", [])
+        if args.symbols:
+            tickers = args.symbols
+            
+        # Limit tickers if --top is set
+        if args.top:
+            tickers = tickers[:args.top]
+            
+        if not args.quiet:
+            print_info(f"Backtesting {len(tickers)} symbols with {screener_cls.__name__}...")
+            
+        # Create progress bar
+        with create_download_progress() as progress:
+            task = progress.add_task("[cyan]Running Backtests...", total=len(tickers))
+            
+            logger = structlog.get_logger()
+            
+            for ticker in tickers:
+                try:
+                    df = data.get("price_data", {}).get(ticker)
+                    if df is None or len(df) < 100:
+                         progress.advance(task)
+                         continue
+                    
+                    # Ensure index is DatetimeIndex
+                    if not isinstance(df.index, pd.DatetimeIndex):
+                        df.index = pd.to_datetime(df.index)
+                    
+                    # Ensure numeric columns
+                    cols = ['Open', 'High', 'Low', 'Close', 'Volume']
+                    for col in cols:
+                        if col in df.columns:
+                            df[col] = pd.to_numeric(df[col], errors='coerce')
+                        
+                    engine = BacktestEngine(df, initial_capital=args.initial_capital)
+                    bt, stats = engine.run(strategy_class=ProjectAlphaStrategy, screener_cls=screener_cls)
+                    
+                    metrics = BacktestPerformance.extract_metrics(stats, ticker, screener_cls.__name__)
+                    backtest_results.append(metrics)
+                    
+                except Exception as e:
+                    logger.error(f"Backtest failed for {ticker}: {e}")
+                
+                progress.advance(task)
+                
+        # Display results summary
+        if backtest_results:
+            # Sort by Return %
+            backtest_results.sort(key=lambda x: x.return_pct or -999, reverse=True)
+            
+            # Print table
+            from rich.table import Table
+            table = Table(title=f"Backtest Results ({screener_cls.__name__})")
+            table.add_column("Ticker", style="cyan")
+            table.add_column("Return %", style="green")
+            table.add_column("Sharpe", style="magenta")
+            table.add_column("Max DD %", style="red")
+            table.add_column("Trades", style="blue")
+            table.add_column("Win Rate %", style="yellow")
+            
+            for res in backtest_results[:20]: # Show top 20
+                table.add_row(
+                    res.ticker,
+                    f"{res.return_pct:.2f}%",
+                    f"{res.sharpe_ratio:.2f}",
+                    f"{res.max_drawdown_pct:.2f}%",
+                    str(res.trade_count),
+                    f"{res.win_rate_pct:.2f}%"
+                )
+            
+            console.print(table)
+            
+            # Save comprehensive CSV
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            csv_path = os.path.join(settings.data_dir, "backtests", f"backtest_summary_{timestamp}.csv")
+            os.makedirs(os.path.dirname(csv_path), exist_ok=True)
+            
+            # Convert list of dataclasses to DataFrame
+            # import pandas as pd  <-- Removed
+            # Handle potential missing attributes or serialization issues
+            try:
+                # Use vars() only if it's a dataclass instance
+                results_data = [vars(r) for r in backtest_results]
+                results_df = pd.DataFrame(results_data)
+                results_df.to_csv(csv_path, index=False)
+                print_success(f"Backtest summary saved to {csv_path}")
+            except Exception as e:
+                logger.error(f"Failed to save CSV: {e}")
+
+        # Exit after backtest
+        return
     
     # Volatility Screening
     if run_all or "volatility" in screeners_to_run:
@@ -397,21 +587,21 @@ def run_screening(args):
         if not args.no_plots:
             # Trend/Momentum trading candidates
             if trend_candidates:
-                trend_dir = "data/processed_data/volatile_trend_trading"
+                trend_dir = os.path.join(settings.data_dir, "processed_data", "volatile_trend_trading")
                 if not args.quiet:
                     print_info(f"Generating {len(trend_candidates)} Trend/Momentum charts...")
                 create_batch_charts("Trend Trading", market, trend_candidates, data, trend_dir)
             
             # Value/Mean-reversion trading candidates
             if value_candidates:
-                value_dir = "data/processed_data/volatile_value_trading"
+                value_dir = os.path.join(settings.data_dir, "processed_data", "volatile_value_trading")
                 if not args.quiet:
                     print_info(f"Generating {len(value_candidates)} Value/Undervalued charts...")
                 create_batch_charts("Value Trading", market, value_candidates, data, value_dir)
             
             # Breakout trading candidates
             if breakout_candidates:
-                breakout_dir = "data/processed_data/volatile_breakout_trading"
+                breakout_dir = os.path.join(settings.data_dir, "processed_data", "volatile_breakout_trading")
                 if not args.quiet:
                     print_info(f"Generating {len(breakout_candidates)} Breakout charts...")
                 create_batch_charts("Breakout Trading", market, breakout_candidates, data, breakout_dir)
@@ -429,7 +619,7 @@ def run_screening(args):
         if not args.quiet:
             print_section("Breakout Screening", "🚀")
         
-        breakout_screener_out_dir = "data/processed_data/screener_breakout"
+        breakout_screener_out_dir = os.path.join(settings.data_dir, "processed_data", "screener_breakout")
         tickers_to_screen = volatile_symbols_bottom if volatile_symbols_bottom else data.get("tickers", [])
         
         # Use new modular screener
@@ -459,8 +649,8 @@ def run_screening(args):
         if not args.quiet:
             print_section("Trend Screening", "📈")
         
-        trend_screener_out_dir = "data/processed_data/screener_trend"
-        trend_screener_history = "data/processed_data/screener_trend_history"
+        trend_screener_out_dir = os.path.join(settings.data_dir, "processed_data", "screener_trend")
+        trend_screener_history = os.path.join(settings.data_dir, "processed_data", "screener_trend_history")
         
         tickers_to_screen = volatile_symbols_top if volatile_symbols_top else data.get("tickers", [])[:200]
         
@@ -505,7 +695,7 @@ def run_screening(args):
             results=results
         )
         
-        console.print("\n[dim]Reports saved to data/processed_data/[/dim]")
+        console.print(f"\n[dim]Reports saved to {os.path.join(settings.data_dir, 'processed_data')}[/dim]")
         console.print("[bold green]✨ Screening complete![/bold green]\n")
 
 

@@ -29,6 +29,8 @@ from classes.DatabaseManager import (
     get_company_info,
 )
 from classes.Tools import ProgressBar, save_dict_with_timestamp
+import structlog
+from exceptions import DataFetchError, ConfigurationError
 
 # Try to import Rich progress components
 try:
@@ -38,7 +40,7 @@ except ImportError:
     RICH_AVAILABLE = False
 
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger()
 
 
 def _handle_start_end_dates(start, end):
@@ -78,7 +80,7 @@ def load_cache(file_prefix: str, source_dir: str = ".") -> Optional[Dict]:
     if data:
         return data
     
-    print(f"Cache not found for {file_prefix}")
+    logger.info("Cache not found", file_prefix=file_prefix)
     return {}
 
 
@@ -142,7 +144,7 @@ def download(
         elif not progress:
             # Fallback to simple progress
             if completed % 50 == 0 or completed == total:
-                print(f"Downloaded {completed}/{total} stocks...")
+                logger.info("Download progress", completed=completed, total=total)
     
     # Create fetcher with retry logic
     fetcher = StockFetcher(
@@ -307,7 +309,7 @@ def load_data(
     """
     # Try loading from cache
     if cache:
-        print("\nLoading historical data...")
+        logger.info("Loading historical data")
         cache_manager = CacheManager(cache_dir=data_dir)
         data = cache_manager.get(file_prefix)
         if data:
@@ -320,11 +322,10 @@ def load_data(
             with open(symbols_file_path, "r") as f:
                 symbols = f.readline().split(" ")
         else:
-            print("No symbols information to download data. Exit script.")
-            sys.exit()
+            raise ConfigurationError("No symbols information to download data (symbols_list.txt missing)")
     
     # Download data
-    print("\nDownloading historical data...")
+    logger.info("Downloading historical data")
     data = download(market, symbols, db_path=db_path, use_rich_progress=use_rich_progress)
     
     # Merge with database data if available
@@ -453,8 +454,10 @@ def load_volatile_data(
     tickers = volatile_data.columns.get_level_values(0)[::2].tolist()
 
     if missing_tickers:
-        print(
-            f"\nRemoving {len(missing_tickers)} symbols due to incomplete data: {missing_tickers[:5]}..."
+        logger.warning(
+            "Removing symbols due to incomplete data", 
+            count=len(missing_tickers), 
+            examples=missing_tickers[:5]
         )
 
     currencies = [

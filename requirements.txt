@@ -138,3 +138,10 @@ xkit==0.0.0
 yfinance==0.2.52
 zipp==1.0.0
 zope.interface==5.4.0
+
+# Added for Project Alpha Refactoring
+rich
+rich-click
+structlog
+pydantic
+pydantic-settings

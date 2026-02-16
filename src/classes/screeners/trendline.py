@@ -7,6 +7,7 @@ Screens stocks based on price trend slope analysis.
 import numpy as np
 import pandas as pd
 
+from config.settings import settings
 from .base import BaseScreener, ScreenerResult, Signal
 
 
@@ -25,7 +26,7 @@ class TrendlineScreener(BaseScreener):
     name = "trendline"
     description = "Price trend slope analysis"
     
-    def __init__(self, lookback_days: int = 5):
+    def __init__(self, lookback_days: int = settings.trend_lookback_days):
         """
         Initialize trendline screener.
         

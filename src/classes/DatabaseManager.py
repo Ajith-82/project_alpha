@@ -65,6 +65,11 @@ def insert_price_rows(conn: sqlite3.Connection, symbol: str, df: pd.DataFrame) -
         df.index.name = "date"
     df.reset_index(inplace=True)
     df.columns = [c.lower().replace(" ", "_") for c in df.columns]
+    
+    # Ensure date is string for sqlite
+    if "date" in df.columns:
+        df["date"] = df["date"].astype(str)
+        
     df["symbol"] = symbol
     records = df[
         [
