@@ -22,6 +22,17 @@ class Settings(BaseSettings):
     breakout_oc_threshold: float = 1.0
     breakout_volume_threshold: float = 0.5
     trend_lookback_days: int = 20
+    breakout_adx_min: float = 20.0  # Minimum ADX for trend strength
+    breakout_atr_expansion_factor: float = 1.5  # Current ATR vs 20-day average
+    
+    # Consensus
+    consensus_weights: dict = {
+        "breakout": 0.4,
+        "trend": 0.3,
+        "volatility": 0.1,
+        "fundamental": 0.1,
+        "sentiment": 0.1
+    }
     
     # Risk
     risk_per_trade: float = 0.01

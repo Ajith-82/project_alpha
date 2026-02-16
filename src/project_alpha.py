@@ -82,8 +82,13 @@ click.rich_click.OPTION_GROUPS = {
 from classes.Download import load_data, load_volatile_data
 from classes.Volatile import volatile
 from classes.screeners import BreakoutScreener, TrendlineScreener
+from classes.screeners.consensus import ConsensusEngine
+from classes.filters.fundamental_filter import FundamentalFilter
+from classes.filters.sentiment_filter import SentimentFilter
 from classes.backtesting.engine import BacktestEngine, ProjectAlphaStrategy
 from classes.backtesting.performance import BacktestPerformance
+from classes.data.news_fetcher import NewsFetcher
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from classes.output import (
     create_batch_charts,
     console, print_banner, print_section, print_success, print_error,
@@ -254,6 +259,21 @@ def validate_screeners(ctx, param, value):
     help="Include value stocks from external screener sources (India only)",
 )
 @click.option(
+    "--fundamental/--no-fundamental",
+    default=False,
+    help="Enable fundamental analysis filtering (requires Finnhub API Key)",
+)
+@click.option(
+    "--sentiment/--no-sentiment",
+    default=False,
+    help="Enable sentiment analysis filtering (uses FinBERT)",
+)
+@click.option(
+    "--consensus/--no-consensus",
+    default=False,
+    help="Enable consensus scoring (runs all screeners and aggregates signals)",
+)
+@click.option(
     "--risk-per-trade",
     type=float,
     default=settings.risk_per_trade,
@@ -292,7 +312,7 @@ def validate_screeners(ctx, param, value):
 @click.version_option(version="0.1.0", prog_name="Project Alpha")
 def cli(market, symbols, screeners, rank, top, min_price, max_price, output_format,
         save_table, no_plots, plot_losses, verbose, quiet, json_logs, log_level, no_banner, cache,
-        db_path, load_model, save_model, value, risk_per_trade, atr_multiplier, max_positions,
+        db_path, load_model, save_model, value, fundamental, sentiment, consensus, risk_per_trade, atr_multiplier, max_positions,
         backtest, initial_capital, benchmark):
     """
     🚀 **Project Alpha** - Your Day-to-Day Trading Companion
@@ -340,6 +360,9 @@ def cli(market, symbols, screeners, rank, top, min_price, max_price, output_form
     args.load_model = load_model
     args.save_model = save_model
     args.value = value
+    args.fundamental = fundamental
+    args.sentiment = sentiment
+    args.consensus = consensus
     args.risk_per_trade = risk_per_trade
     args.atr_multiplier = atr_multiplier
     args.max_positions = max_positions
@@ -367,6 +390,111 @@ def screener_value_charts(cache, market: str, index: str, symbols: list, db_path
     os.makedirs(processed_data_dir, exist_ok=True)
     
     create_batch_charts("IND_screener_value_stocks", market, value_symbols, {"price_data": price_data}, processed_data_dir)
+
+
+def apply_filters(symbols, args, filter_cache=None):
+    """
+    Apply additional filters (Fundamental, Sentiment) to a list of symbols.
+    
+    Args:
+        symbols: List of ticker symbols
+        args: CLI arguments
+        filter_cache: Optional dict to store filter results {ticker: {filter_name: score}}
+        
+    Returns:
+        List of filtered symbols
+    """
+    if not symbols:
+        return []
+        
+    filtered_symbols = symbols.copy()
+    
+    # Fundamental Analysis
+    if args.fundamental:
+        if not args.quiet:
+            print_info(f"Running fundamental analysis on {len(filtered_symbols)} symbols...")
+            
+        fundamental_filter = FundamentalFilter()
+        passed_fundamental = []
+        
+        with create_download_progress() as progress:
+            task = progress.add_task("[cyan]Checking Fundamentals...", total=len(filtered_symbols))
+            
+            for ticker in filtered_symbols:
+                result = fundamental_filter.check_health(ticker)
+                
+                # Cache result if container provided
+                if filter_cache is not None:
+                    if ticker not in filter_cache:
+                        filter_cache[ticker] = {}
+                    # Simple mapping: passed = 1.0, failed = 0.0
+                    filter_cache[ticker]["fundamental"] = 1.0 if result["passed"] else 0.0
+                    
+                if result["passed"]:
+                    passed_fundamental.append(ticker)
+                progress.advance(task)
+                
+        if not args.quiet:
+            print_success(f"Fundamental filter: {len(passed_fundamental)}/{len(filtered_symbols)} passed")
+        filtered_symbols = passed_fundamental
+
+    # Sentiment Analysis
+    if args.sentiment and filtered_symbols:
+        if not args.quiet:
+            print_info(f"Running sentiment analysis on {len(filtered_symbols)} symbols...")
+            
+        sentiment_filter = SentimentFilter()
+        passed_sentiment = []
+        
+        sentiment_filter = SentimentFilter()
+        news_fetcher = NewsFetcher()
+        passed_sentiment = []
+        
+        def process_sentiment(ticker):
+             try:
+                 headlines = news_fetcher.fetch_headlines(ticker)
+                 if not headlines:
+                     return ticker, None
+                 return ticker, sentiment_filter.analyze_sentiment(headlines)
+             except Exception as e:
+                 return ticker, None
+
+        with create_download_progress() as progress:
+            task = progress.add_task("[cyan]Checking Sentiment...", total=len(filtered_symbols))
+            
+            with ThreadPoolExecutor(max_workers=5) as executor:
+                futures = {executor.submit(process_sentiment, t): t for t in filtered_symbols}
+                
+                for future in as_completed(futures):
+                    ticker, result = future.result()
+                    
+                    if result:
+                        # Cache result/score logic
+                        if filter_cache is not None:
+                            if ticker not in filter_cache:
+                                filter_cache[ticker] = {}
+                            
+                            sent_score = 0.5
+                            if result["label"] == "positive":
+                                sent_score = 0.5 + (result["score"] * 0.5)
+                            elif result["label"] == "negative":
+                                sent_score = 0.5 - (result["score"] * 0.5)
+                            
+                            filter_cache[ticker]["sentiment"] = sent_score
+                            
+                        if result["label"] != "negative":
+                            passed_sentiment.append(ticker)
+                    else:
+                        # Fallback for no news or error: Pass
+                        passed_sentiment.append(ticker)
+                        
+                    progress.advance(task)
+
+        if not args.quiet:
+            print_success(f"Sentiment filter: {len(passed_sentiment)}/{len(filtered_symbols)} passed")
+        filtered_symbols = passed_sentiment
+        
+    return filtered_symbols
 
 
 def run_screening(args):
@@ -440,6 +568,11 @@ def run_screening(args):
     
     # Determine which screeners to run
     run_all = "all" in screeners_to_run
+
+    # Track results for consensus engine
+    from collections import defaultdict
+    all_screener_results = defaultdict(dict)
+    global_filter_results = {} # Cache for filter scores {ticker: {filter_name: score}}
 
     # Backtesting Mode
     if getattr(args, 'backtest', False):
@@ -626,7 +759,15 @@ def run_screening(args):
         breakout_screener = BreakoutScreener()
         price_data = data.get("price_data", {})
         batch_result = breakout_screener.screen_batch(tickers_to_screen, price_data)
+        if args.consensus:
+             for res in batch_result.results:
+                 if res.signal: # Store all signals
+                     all_screener_results[res.ticker]["breakout"] = res
+
         breakout_screener_out_symbols = [r.ticker for r in batch_result.buys]
+        
+        # Apply Base Filters (Fundamental, Sentiment)
+        breakout_screener_out_symbols = apply_filters(breakout_screener_out_symbols, args, filter_cache=global_filter_results)
         
         # Apply --top limit if specified
         if hasattr(args, 'top') and args.top and len(breakout_screener_out_symbols) > args.top:
@@ -658,7 +799,15 @@ def run_screening(args):
         trend_screener = TrendlineScreener(lookback_days=screener_dur)
         price_data = data.get("price_data", {})
         batch_result = trend_screener.screen_batch(tickers_to_screen, price_data)
+        if args.consensus:
+             for res in batch_result.results:
+                 if res.signal:
+                     all_screener_results[res.ticker]["trend"] = res
+
         trend_screener_out_symbols = [r.ticker for r in batch_result.buys]
+        
+        # Apply Base Filters (Fundamental, Sentiment)
+        trend_screener_out_symbols = apply_filters(trend_screener_out_symbols, args, filter_cache=global_filter_results)
         
         # Apply --top limit if specified
         if hasattr(args, 'top') and args.top and len(trend_screener_out_symbols) > args.top:
@@ -685,6 +834,75 @@ def run_screening(args):
                 print_warning("No trending stocks found")
         results["Trend"] = len(trend_screener_out_symbols)
     
+    # Consensus Engine
+    if args.consensus and all_screener_results:
+        if not args.quiet:
+            print_section("Consensus Analysis", "🧠")
+            
+        consensus_engine = ConsensusEngine()
+        consensus_results = []
+        
+        # Iterate over all tickers that appeared in any screener
+        all_tickers = list(all_screener_results.keys())
+        
+        for ticker in all_tickers:
+            screener_res = all_screener_results[ticker]
+            # Only consider if there's at least one BUY signal
+            if not any(r.signal == 1 for r in screener_res.values()):
+                continue
+                
+            # Optional: Calculate filter scores
+            filter_scores = {}
+            # Retrieve cached scores if available
+            if ticker in global_filter_results:
+                filter_scores = global_filter_results[ticker]
+            
+            # Note: We rely on apply_filters having populated the cache.
+            # If a ticker wasn't in the buy list of breakout/trend filters, it might not have been filtered.
+            # However, here we iterate 'all_screener_results', which contains ALL signals.
+            # But apply_filters is only run on the BUY candidates of each screener.
+            # If a ticker had a SELL signal, it wouldn't have gone through apply_filters.
+            # That's acceptable for now as we only care about consensus on potential BUYs.
+            
+            # If filters are enabled but cache missing (e.g. ticker didn't pass initial screener cut but we want consensus?)
+            # Currently apply_filters runs on the output of screeners.
+            # So if a ticker is here, it implies it was returned by at least one screener.
+            
+            # Calculate score
+            c_res = consensus_engine.calculate_score(ticker, screener_res, filter_scores)
+            
+            if c_res.score >= 0.5: # Filter weak consensus
+                consensus_results.append(c_res)
+                
+        # Sort by score
+        consensus_results.sort(key=lambda x: x.score, reverse=True)
+        
+        if consensus_results:
+            results["Consensus"] = len(consensus_results)
+            
+            from rich.table import Table
+            table = Table(title="Top Consensus Picks")
+            table.add_column("Ticker", style="cyan")
+            table.add_column("Score", style="magenta")
+            table.add_column("Rec", style="green")
+            table.add_column("Signals", style="yellow")
+            
+            for res in consensus_results[:20]:
+                signals_str = ", ".join([f"{k}:{v}" for k,v in res.signals.items()])
+                table.add_row(
+                    res.ticker,
+                    f"{res.score:.2f}",
+                    res.recommendation,
+                    signals_str
+                )
+            console.print(table)
+            
+            if not args.quiet:
+                print_success(f"Identified {len(consensus_results)} consensus candidates")
+        else:
+            if not args.quiet:
+                print_warning("No strong consensus found")
+
     # Summary
     if not args.quiet:
         screeners_run = [s for s in ["Volatility", "Breakout", "Trend"] if s in results]

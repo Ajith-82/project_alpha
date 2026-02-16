@@ -177,9 +177,23 @@ def download(
     for ticker, result in results.items():
         if result.success and result.price_data is not None:
             # Validate price data
-            validation = validator.validate_price_data(result.price_data, ticker)
-            
-            if validation.valid:
+            # Use strict validators from src.classes.data.validators
+            try:
+                # Basic validation (NaNs, rows)
+                validation = validator.validate_price_data(result.price_data, ticker)
+                if not validation.valid:
+                     logger.warning(f"Basic validation failed for {ticker}: {validation.errors}")
+                     continue
+
+                # Strict validation (Sanity, schema)
+                from classes.data.validators import validate_data_quality, repair_data
+                
+                # Proactively repair data
+                result.price_data = repair_data(result.price_data, ticker)
+                
+                result.price_data = validate_data_quality(result.price_data, ticker)
+                
+                # If we get here, data is valid
                 price_data[ticker] = result.price_data
                 if result.company_info:
                     company_info[ticker] = result.company_info
@@ -187,8 +201,9 @@ def download(
                 # Save to database if path provided
                 if db_path:
                     _save_to_db(db_path, ticker, result.price_data, result.company_info)
-            else:
-                logger.warning(f"Invalid data for {ticker}: {validation.errors}")
+                    
+            except Exception as e:
+                logger.warning(f"Validation failed for {ticker}: {e}")
         else:
             logger.warning(f"Failed to fetch {ticker}: {result.error}")
     
