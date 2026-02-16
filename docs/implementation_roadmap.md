@@ -1,712 +1,1103 @@
-# Project Alpha — Three-Phase Implementation Roadmap
+# Project Alpha — Unified Implementation Roadmap
 
-> Research-backed TODO list for upgrading Project Alpha from a screening tool to a complete trading analysis platform.
+> Merges **trading strategy improvements** ([weakness_mitigations.md](file:///opt/developments/project_alpha/docs/weakness_mitigations.md)) with **production engineering** ([production_readiness_gaps.md](file:///opt/developments/project_alpha/docs/production_readiness_gaps.md)) into a single, actionable three-phase plan.
+
+---
+
+## Coverage Traceability
+
+Every item from `production_readiness_gaps.md` is mapped to a phase:
+
+| Production Gap | Severity | Roadmap Phase | Section |
+|----------------|----------|---------------|---------|
+| Testing Infrastructure | 🔴 Critical | Phase 1 | §1.1 |
+| Backtesting Framework | 🔴 Critical | Phase 1 | §1.4–1.5 |
+| Monitoring & Observability | 🔴 Critical | Phase 3 | §3.5 |
+| Configuration Management | 🟠 High | Phase 1 | §1.2 |
+| Structured Logging & Errors | 🟠 High | Phase 1 | §1.3 |
+| API Layer (FastAPI) | 🟠 High | Phase 3 | §3.6 |
+| Security | 🟠 High | Phase 3 | §3.7 |
+| Scalability | 🟡 Medium | Phase 3 | §3.8 |
+| Data Validation | 🟡 Medium | Phase 2 | §2.1 |
+| Documentation | 🟡 Medium | Phase 3 | §3.9 |
 
 ---
 
 ## Architecture Overview
 
-The roadmap adds three new layers around the existing pipeline without modifying its core:
-
 ```mermaid
 graph TB
-    subgraph "Phase 3 — Infrastructure"
+    subgraph "Phase 3 — Infrastructure & Production"
         DP["Data Provider Chain<br/>(Polygon ↔ Alpha Vantage ↔ yfinance)"]
         RD["Regime Detector<br/>(hmmlearn HMM)"]
         WF["Walk-Forward Validator"]
+        MON["Monitoring<br/>(Prometheus + Grafana)"]
+        API["REST API<br/>(FastAPI)"]
+        SEC["Security<br/>(JWT + Secrets)"]
     end
 
-    subgraph "Phase 2 — Signal Quality"
-        FA["Fundamental Filter<br/>(Finnhub / FundamentalAnalysis)"]
+    subgraph "Phase 2 — Signal Quality & Validation"
+        FA["Fundamental Filter<br/>(Finnhub)"]
         SA["Sentiment Filter<br/>(FinBERT)"]
-        BC["Breakout Confirmation<br/>(ADX + ATR expansion)"]
-        CS["Consensus Scoring Engine"]
+        BC["Breakout Confirmation<br/>(ADX + ATR)"]
+        CS["Consensus Scoring"]
+        DV["Data Validation"]
     end
 
-    subgraph "Existing Core (Unchanged)"
-        VM["Volatility Model<br/>(MSIS-MCS)"]
-        SC["Screeners<br/>(Breakout · MACD · MA · Trend · Donchian)"]
-    end
-
-    subgraph "Phase 1 — Backtesting + Risk"
-        RM["Risk Manager<br/>(Stop-loss · Position sizing)"]
+    subgraph "Phase 1 — Foundation"
+        CFG["Config Management<br/>(Pydantic)"]
+        LOG["Structured Logging<br/>(structlog)"]
+        TST["Test Infrastructure<br/>(pytest)"]
+        RM["Risk Manager"]
         BT["Backtester<br/>(Backtesting.py)"]
         TC["Transaction Cost Model"]
-        PR["Performance Reports<br/>(pyfolio)"]
     end
 
-    DP --> VM
+    subgraph "Existing Core"
+        VM["Volatility Model<br/>(MSIS-MCS)"]
+        SC["Screeners"]
+    end
+
+    API --> SEC
+    DP --> VM --> SC
+    DV --> DP
     RD --> CS
-    VM --> SC
-    FA --> CS
-    SA --> CS
-    BC --> SC
-    SC --> CS
-    CS --> RM
-    RM --> BT
+    FA & SA --> CS
+    BC --> SC --> CS --> RM --> BT
     TC --> BT
-    BT --> PR
     WF --> BT
+    MON --> BT & SC & VM
+    CFG --> VM & SC
+    LOG --> SC & VM & BT
 ```
 
 ---
 
-## New Dependencies Summary
+## New Dependencies (All Phases)
 
 | Package | Version | Phase | Purpose |
 |---------|---------|-------|---------|
+| `pydantic-settings` | ≥ 2.0 | 1 | Configuration management |
+| `structlog` | ≥ 24.1 | 1 | Structured logging |
+| `pytest` + `pytest-mock` + `pytest-cov` | ≥ 8.0 | 1 | Testing framework |
 | `backtesting` | ≥ 0.3.3 | 1 | Backtesting engine |
-| `pyfolio-reloaded` | ≥ 0.9.5 | 1 | Performance/risk analytics |
-| `pandas-ta` | ≥ 0.3.14b | 1 | ATR, ADX indicators (already present) |
-| `transformers` | ≥ 4.36 | 2 | FinBERT sentiment model |
-| `torch` | ≥ 2.1 | 2 | FinBERT backend |
-| `fundamentalanalysis` | ≥ 0.3.1 | 2 | Fundamental data via FMP API |
-| `finnhub-python` | ≥ 2.4 | 2 | Fundamentals + sentiment API |
+| `pyfolio-reloaded` | ≥ 0.9.5 | 1 | Performance analytics |
+| `transformers` + `torch` | ≥ 4.36 | 2 | FinBERT sentiment |
+| `fundamentalanalysis` | ≥ 0.3.1 | 2 | Fundamental data |
+| `finnhub-python` | ≥ 2.4 | 2 | Fundamentals + news API |
 | `polygon-api-client` | ≥ 1.12 | 3 | Fallback data provider |
 | `alpha-vantage` | ≥ 2.3 | 3 | Fallback data provider |
 | `hmmlearn` | ≥ 0.3.0 | 3 | Market regime detection |
+| `fastapi` + `uvicorn` | ≥ 0.110 | 3 | REST API |
+| `python-jose` + `passlib` | latest | 3 | JWT auth |
+| `prometheus-client` | ≥ 0.20 | 3 | Metrics export |
 
 ---
 
-## Phase 1: Backtesting + Risk Management
+# Phase 1: Foundation (Weeks 1–4)
 
-**Goal:** Prove whether the strategy makes money, and protect capital when it doesn't.
-
-**Estimated Effort:** 3–4 weeks
-
----
-
-### 1.1 Risk Manager Module
+**Goal:** Establish engineering fundamentals (config, logging, testing) **and** build the backtesting + risk management layer.
 
 > [!IMPORTANT]
-> This is the foundation all other Phase 1 work depends on.
-
-#### New File: `src/classes/risk/risk_manager.py`
-
-```python
-@dataclass
-class RiskConfig:
-    max_risk_per_trade: float = 0.01       # 1% of portfolio per trade
-    atr_multiplier: float = 2.0            # Stop-loss = entry - 2×ATR
-    atr_period: int = 14
-    max_portfolio_exposure: float = 0.25   # Max 25% of portfolio in one sector
-    max_open_positions: int = 10
-    trailing_stop: bool = True
-
-class RiskManager:
-    def calculate_stop_loss(self, entry: float, atr: float) -> float
-    def calculate_position_size(self, portfolio_value: float, entry: float, stop_loss: float) -> int
-    def check_portfolio_limits(self, current_positions: List[Position]) -> bool
-    def update_trailing_stop(self, position: Position, current_price: float) -> float
-```
-
-#### TODO Checklist
-
-- [ ] **1.1.1** Create `src/classes/risk/__init__.py` and `risk_manager.py`
-- [ ] **1.1.2** Implement `RiskConfig` dataclass with CLI argument mapping
-- [ ] **1.1.3** Implement ATR-based stop-loss calculation
-  ```python
-  def calculate_stop_loss(self, entry_price: float, atr: float) -> float:
-      return entry_price - (self.config.atr_multiplier * atr)
-  ```
-- [ ] **1.1.4** Implement fixed-risk position sizing
-  ```python
-  def calculate_position_size(self, portfolio_value, entry, stop_loss):
-      risk_amount = portfolio_value * self.config.max_risk_per_trade
-      risk_per_share = abs(entry - stop_loss)
-      return int(risk_amount / risk_per_share) if risk_per_share > 0 else 0
-  ```
-- [ ] **1.1.5** Implement trailing stop logic (ATR-trailing: raise stop when price moves favourably, never lower it)
-- [ ] **1.1.6** Implement portfolio-level exposure limits (max positions, sector concentration)
-- [ ] **1.1.7** Add `--risk-per-trade`, `--atr-multiplier`, `--max-positions` CLI options to `project_alpha.py`
-- [ ] **1.1.8** Write unit tests in `tests/test_risk_manager.py`
-
-#### Research Notes
-
-- **ATR stop-loss** uses `pandas_ta.atr(high, low, close, length=14)`. A multiplier of 2.0 is standard for swing trading; 1.5 for tighter, 3.0 for wider.
-- **Position sizing formula**: `shares = (portfolio × risk_pct) / (entry - stop_loss)`. This ensures dollar risk is constant regardless of stock price.
-- The trailing stop should use `max(current_stop, current_price - atr_multiplier × atr)` — it only ratchets up, never down.
+> Phase 1 must be completed first — everything in Phases 2 and 3 depends on proper configuration, logging, and testing infrastructure.
 
 ---
 
-### 1.2 Transaction Cost Model
+## §1.1 Testing Infrastructure
 
-#### New File: `src/classes/risk/transaction_costs.py`
+> Addresses: **Production Gap #1 (🔴 Critical) — 0% → 80%+ coverage**
 
-```python
-@dataclass
-class TransactionCosts:
-    commission_per_trade: float = 0.0     # Many brokers now zero-commission
-    slippage_bps: float = 5.0             # 0.05% slippage
-    spread_bps: float = 3.0               # Bid-ask half-spread
-    tax_rate: float = 0.0                 # Capital gains tax (if applicable)
-    
-    def round_trip_cost(self, trade_value: float) -> float:
-        """Total cost for a buy + sell."""
-        pct = 2 * (self.slippage_bps + self.spread_bps) / 10000
-        return trade_value * pct + 2 * self.commission_per_trade
+### New Directory Structure
+
+```
+tests/
+├── conftest.py                     # Shared pytest fixtures
+├── fixtures/
+│   └── sample_data.py              # Mock OHLCV data generators
+├── unit/
+│   ├── test_database_manager.py    # CRUD operations
+│   ├── test_download.py            # Data fetching (mocked)
+│   ├── test_models.py              # Model I/O, convergence checks
+│   ├── test_screeners/
+│   │   ├── test_breakout.py
+│   │   ├── test_trendline.py
+│   │   ├── test_macd.py
+│   │   ├── test_donchian.py
+│   │   └── test_moving_average.py
+│   ├── test_risk_manager.py        # (Phase 1 new module)
+│   ├── test_transaction_costs.py   # (Phase 1 new module)
+│   └── test_config.py              # (Phase 1 new module)
+└── integration/
+    ├── test_pipeline.py            # End-to-end workflow
+    └── test_data_consistency.py    # DB ↔ Pickle parity
 ```
 
-#### TODO Checklist
+### TODO Checklist
 
-- [ ] **1.2.1** Create `transaction_costs.py` with configurable cost model
-- [ ] **1.2.2** Add India-specific STT/CTT defaults and US-specific defaults as presets
-- [ ] **1.2.3** Integrate cost deduction into the backtesting loop (see 1.3)
-- [ ] **1.2.4** Write unit tests
+- [ ] **1.1.1** Create `tests/conftest.py` with shared pytest fixtures
+- [ ] **1.1.2** Create `tests/fixtures/sample_data.py` — generate synthetic OHLCV DataFrames for known patterns
+  ```python
+  def make_uptrend(days=60, start_price=100, daily_return=0.005):
+      """Generate synthetic uptrend data for testing."""
+  def make_breakout(days=60, consolidation_days=40):
+      """Generate synthetic consolidation → breakout pattern."""
+  def make_bear_market(days=60, start_price=100, daily_return=-0.008):
+      """Generate synthetic downtrend data."""
+  ```
+- [ ] **1.1.3** Write `test_database_manager.py` — test CRUD, duplicate handling, empty DataFrames
+- [ ] **1.1.4** Write `test_download.py` — mock `yfinance.download()`, test retry logic, missing data handling
+- [ ] **1.1.5** Write `test_models.py` — test model I/O (save/load), verify loss decreases during training
+- [ ] **1.1.6** Write `test_breakout.py` — verify signal fires only when all 5 conditions met
+- [ ] **1.1.7** Write `test_trendline.py` — validate angle thresholds map to correct trend labels
+- [ ] **1.1.8** Write `test_macd.py` — verify crossover detection in synthetic data
+- [ ] **1.1.9** Write `test_donchian.py` — verify channel boundary signals
+- [ ] **1.1.10** Write `test_moving_average.py` — verify all 5 sub-strategies
+- [ ] **1.1.11** Write `test_pipeline.py` — integration test for full end-to-end workflow
+- [ ] **1.1.12** Write `test_data_consistency.py` — verify DB ↔ Pickle produce identical results
+- [ ] **1.1.13** Add `pytest.ini` or `pyproject.toml` pytest config with coverage thresholds
+  ```ini
+  [tool.pytest.ini_options]
+  minversion = "8.0"
+  testpaths = ["tests"]
+  
+  [tool.coverage.run]
+  source = ["src"]
+  
+  [tool.coverage.report]
+  fail_under = 80
+  ```
+- [ ] **1.1.14** Verify `pytest --cov` shows ≥ 80% coverage across core modules
 
-#### Research Notes
+### Research Notes
 
-- **Zipline** separates slippage models (FixedSlippage, VolumeShareSlippage) from commission models (PerShare, PerDollar). This clean separation is worth emulating.
-- For Indian markets: STT = 0.1% on sell, stamp duty = 0.015%. For US: most brokers are zero-commission but slippage still applies.
+- Existing `tests/test_screeners.py` (12.5 KB) already has some screener tests. These should be reviewed and migrated into the new structure rather than duplicated.
+- Use `pytest-mock` for mocking external APIs (yfinance, email). Use `pytest-cov` for coverage reporting.
 
 ---
 
-### 1.3 Backtesting Engine
+## §1.2 Configuration Management
 
-#### New File: `src/classes/backtesting/engine.py`
+> Addresses: **Production Gap #4 (🟠 High) — Hardcoded values → externalised config**
 
-Uses [Backtesting.py](https://github.com/kernc/backtesting.py) — chosen for simplicity, good visualisation, and Pandas compatibility.
+### New Files
 
-```python
-from backtesting import Strategy, Backtest
-
-class ProjectAlphaStrategy(Strategy):
-    """Wraps any BaseScreener into a Backtesting.py strategy."""
-    
-    screener_name = 'breakout'  # Parameterised
-    risk_per_trade = 0.01
-    atr_period = 14
-    atr_multiplier = 2.0
-    
-    def init(self):
-        # Pre-compute screener signals for every bar
-        self.signal = self.I(self._compute_signals, self.data.df)
-        self.atr = self.I(compute_atr, self.data.High, self.data.Low, self.data.Close)
-    
-    def next(self):
-        if self.signal[-1] == 1 and not self.position:  # BUY signal
-            stop = self.data.Close[-1] - self.atr_multiplier * self.atr[-1]
-            size = self.risk_per_trade * self.equity / (self.data.Close[-1] - stop)
-            self.buy(size=int(size), sl=stop)
-        elif self.signal[-1] == -1 and self.position:  # SELL signal
-            self.position.close()
+```
+src/config/
+├── __init__.py
+├── settings.py          # Pydantic settings model
+└── defaults.yaml        # Default configuration values
 ```
 
-#### TODO Checklist
+### TODO Checklist
 
-- [ ] **1.3.1** Create `src/classes/backtesting/__init__.py` and `engine.py`
-- [ ] **1.3.2** Implement `ScreenerSignalAdapter` — converts any `BaseScreener` into a signal array over historical data
+- [ ] **1.2.1** Create `src/config/settings.py` with Pydantic `BaseSettings`
+  ```python
+  from pydantic_settings import BaseSettings
+  from pydantic import Field
+  from pathlib import Path
+  from typing import Literal, Optional
+  
+  class Settings(BaseSettings):
+      # Data
+      market: Literal["us", "india"] = "us"
+      data_dir: Path = Path("data")
+      cache_ttl_hours: int = 24
+      
+      # Model
+      model_order: int = 2
+      correlation_order: int = 52
+      learning_rate: float = 0.01
+      trend_steps: int = 10000
+      correlation_steps: int = 50000
+      
+      # Screeners
+      min_volume: int = 100_000
+      breakout_selling_pressure_max: float = 0.40
+      breakout_oc_threshold: float = 1.0
+      breakout_volume_threshold: float = 0.5
+      trend_lookback_days: int = 20
+      
+      # Risk
+      risk_per_trade: float = 0.01
+      atr_multiplier: float = 2.0
+      max_positions: int = 10
+      
+      # Email
+      smtp_host: Optional[str] = None
+      smtp_port: int = 587
+      
+      # API Keys
+      finnhub_api_key: Optional[str] = None
+      polygon_api_key: Optional[str] = None
+      fmp_api_key: Optional[str] = None
+      
+      model_config = {"env_file": ".env", "env_prefix": "PA_"}
+  ```
+- [ ] **1.2.2** Create `.env.example` documenting all environment variables
+- [ ] **1.2.3** Refactor `VolatileConfig` to source defaults from `Settings`
+- [ ] **1.2.4** Refactor each screener's `__init__` to accept parameters from `Settings`
+- [ ] **1.2.5** Refactor `project_alpha.py` CLI arguments to use `Settings` as defaults (CLI overrides env)
+- [ ] **1.2.6** Create `defaults.yaml` for non-sensitive defaults
+- [ ] **1.2.7** Write `tests/unit/test_config.py` — test env loading, overrides, validation
+- [ ] **1.2.8** Add `.env` to `.gitignore`
+
+### Research Notes
+
+- `pydantic-settings` v2 uses `model_config` instead of inner `Config` class. Supports `.env` files, environment variable prefixing (`PA_MARKET=india`), and type coercion.
+- CLI args → env vars → defaults.yaml → code defaults. This precedence ensures flexibility without breaking existing usage.
+
+---
+
+## §1.3 Structured Logging & Error Handling
+
+> Addresses: **Production Gap #5 (🟠 High) — print() → structured logging**
+
+### New Files
+
+```
+src/logging_config.py            # structlog setup
+src/exceptions.py                # Custom exception hierarchy
+```
+
+### TODO Checklist
+
+- [ ] **1.3.1** Create `src/logging_config.py`
+  ```python
+  import structlog
+  import logging
+  
+  def configure_logging(level: str = "INFO", json_output: bool = False):
+      processors = [
+          structlog.contextvars.merge_contextvars,
+          structlog.processors.add_log_level,
+          structlog.processors.TimeStamper(fmt="iso"),
+          structlog.processors.StackInfoRenderer(),
+      ]
+      if json_output:
+          processors.append(structlog.processors.JSONRenderer())
+      else:
+          processors.append(structlog.dev.ConsoleRenderer())
+      
+      structlog.configure(processors=processors)
+  ```
+- [ ] **1.3.2** Create `src/exceptions.py` with custom exception hierarchy
+  ```python
+  class ProjectAlphaError(Exception):
+      """Base exception for all application errors."""
+  
+  class DataFetchError(ProjectAlphaError):
+      """Failed to download market data."""
+  
+  class ScreenerError(ProjectAlphaError):
+      """Screener execution failed."""
+  
+  class ModelTrainingError(ProjectAlphaError):
+      """Model failed to converge."""
+  
+  class ConfigurationError(ProjectAlphaError):
+      """Invalid configuration."""
+  
+  class DataValidationError(ProjectAlphaError):
+      """Input data failed validation."""
+  ```
+- [ ] **1.3.3** Replace `print()` calls in `Download.py` with `logger.info()`/`logger.error()`
+- [ ] **1.3.4** Replace `print()` calls in `Volatile.py` with structured log calls
+- [ ] **1.3.5** Replace `print()` calls in `project_alpha.py` with structured log calls
+- [ ] **1.3.6** Replace string error returns (e.g., `return "Error: ..."`) with proper exception raising
+- [ ] **1.3.7** Add `try/except` blocks in screener batch execution with `logger.exception()`
+- [ ] **1.3.8** Add `--log-level` and `--json-logs` CLI options
+- [ ] **1.3.9** Write tests verifying log output format and exception propagation
+
+### Research Notes
+
+- `structlog` supports both developer-friendly coloured console output (dev mode) and JSON (production). Switch with a single flag.
+- **Key pattern**: Use `structlog.contextvars` to bind `ticker=` and `screener=` context per request, so every log line from within a screener includes those fields automatically.
+- Existing code in `BaseScreener.screen_batch()` already has try/except — just needs to replace the generic error handling with structured logging.
+
+---
+
+## §1.4 Risk Manager Module
+
+### New Files
+
+```
+src/classes/risk/
+├── __init__.py
+├── risk_manager.py
+└── transaction_costs.py
+```
+
+### TODO Checklist
+
+- [ ] **1.4.1** Create `src/classes/risk/__init__.py` and `risk_manager.py`
+- [ ] **1.4.2** Implement `RiskConfig` dataclass sourcing defaults from `Settings` (§1.2)
+  ```python
+  @dataclass
+  class RiskConfig:
+      max_risk_per_trade: float = 0.01
+      atr_multiplier: float = 2.0
+      atr_period: int = 14
+      max_portfolio_exposure: float = 0.25
+      max_open_positions: int = 10
+      trailing_stop: bool = True
+  ```
+- [ ] **1.4.3** Implement ATR-based stop-loss: `stop = entry - (multiplier × ATR)`
+- [ ] **1.4.4** Implement fixed-risk position sizing: `shares = (portfolio × risk%) / (entry - stop)`
+- [ ] **1.4.5** Implement trailing stop logic (ratchets up only, never down)
+- [ ] **1.4.6** Implement portfolio-level exposure limits (max positions, sector concentration cap)
+- [ ] **1.4.7** Add `--risk-per-trade`, `--atr-multiplier`, `--max-positions` CLI options
+- [ ] **1.4.8** Create `transaction_costs.py`
+  ```python
+  @dataclass
+  class TransactionCosts:
+      commission_per_trade: float = 0.0
+      slippage_bps: float = 5.0
+      spread_bps: float = 3.0
+      
+      # Presets
+      @classmethod
+      def us_default(cls): return cls(commission_per_trade=0.0, slippage_bps=5.0, spread_bps=3.0)
+      
+      @classmethod
+      def india_default(cls): return cls(commission_per_trade=20.0, slippage_bps=10.0, spread_bps=5.0)
+  ```
+- [ ] **1.4.9** Write `tests/unit/test_risk_manager.py` and `test_transaction_costs.py`
+
+### Research Notes
+
+- ATR multiplier of 2.0 is standard for swing trading. Use `pandas_ta.atr()` which is already a project dependency.
+- Position sizing formula ensures constant dollar risk regardless of stock price — a $10 stock and a $500 stock get equally risk-weighted.
+
+---
+
+## §1.5 Backtesting Engine
+
+### New Files
+
+```
+src/classes/backtesting/
+├── __init__.py
+├── engine.py           # Backtesting.py strategy wrapper
+├── adapter.py          # Converts BaseScreener → signal array
+└── performance.py      # Metrics + pyfolio reports
+```
+
+### TODO Checklist
+
+- [ ] **1.5.1** Create `adapter.py` — `ScreenerSignalAdapter`
   ```python
   class ScreenerSignalAdapter:
+      """Runs any BaseScreener over historical data to produce a signal array."""
       def __init__(self, screener: BaseScreener)
       def compute_signals(self, df: pd.DataFrame) -> np.ndarray:
-          """Run screener on rolling windows; return +1/0/-1 array."""
+          """Walk through df in rolling windows, call screener.screen(), return +1/0/-1."""
   ```
-- [ ] **1.3.3** Implement `ProjectAlphaStrategy(Strategy)` — the Backtesting.py strategy wrapper
-- [ ] **1.3.4** Integrate `RiskManager` for stop-loss and position sizing inside `next()`
-- [ ] **1.3.5** Integrate `TransactionCosts` — apply costs on each trade
-- [ ] **1.3.6** Implement `run_backtest(screener, ticker, data, config) -> BacktestResult`
-- [ ] **1.3.7** Implement `run_batch_backtest(screener, tickers, data, config) -> BatchBacktestResult`
-- [ ] **1.3.8** Add `--backtest` flag and `--initial-capital` CLI option to `project_alpha.py`
-- [ ] **1.3.9** Generate interactive HTML backtest report (built into Backtesting.py via `bt.plot()`)
-- [ ] **1.3.10** Write integration tests using known historical data with expected outcomes
+- [ ] **1.5.2** Create `engine.py` — `ProjectAlphaStrategy(Strategy)`
+  ```python
+  from backtesting import Strategy, Backtest
+  
+  class ProjectAlphaStrategy(Strategy):
+      screener_name = 'breakout'
+      risk_per_trade = 0.01
+      atr_multiplier = 2.0
+      
+      def init(self):
+          self.signal = self.I(self._compute_signals, self.data.df)
+          self.atr = self.I(compute_atr, self.data.High, self.data.Low, self.data.Close)
+      
+      def next(self):
+          if self.signal[-1] == 1 and not self.position:
+              stop = self.data.Close[-1] - self.atr_multiplier * self.atr[-1]
+              size = self.risk_per_trade * self.equity / max(self.data.Close[-1] - stop, 0.01)
+              self.buy(size=int(size), sl=stop)
+          elif self.signal[-1] == -1 and self.position:
+              self.position.close()
+  ```
+- [ ] **1.5.3** Integrate `TransactionCosts` — apply per-trade cost deduction
+- [ ] **1.5.4** Implement `run_backtest(screener, ticker, data, config) -> BacktestResult`
+- [ ] **1.5.5** Implement `run_batch_backtest(screener, tickers, data, config) -> BatchBacktestResult`
+- [ ] **1.5.6** Create `performance.py` — compute Sharpe, Sortino, max drawdown, win rate, profit factor, CAGR
+- [ ] **1.5.7** Integrate pyfolio tear sheet generation (drawdown plot, rolling Sharpe, monthly returns)
+- [ ] **1.5.8** Generate interactive HTML backtest report via `bt.plot()`
+- [ ] **1.5.9** Output per-trade P&L CSV
+- [ ] **1.5.10** Integrate into email/PDF pipeline
+- [ ] **1.5.11** Add `--backtest`, `--initial-capital`, `--benchmark SPY` CLI options
+- [ ] **1.5.12** Write integration tests using known historical data
 
-#### Research Notes
+### Research Notes
 
-- **Backtesting.py pattern**: `init()` pre-computes all indicators using `self.I(func, ...)` which wraps them for plotting. `next()` is called per bar with access to `self.data`, `self.position`, `self.equity`.
-- The `self.I()` wrapper requires the function to return a Series/array of the same length as the data. The screener adapter must therefore run in a "rolling window" mode across all historical bars.
-- **Alternatives considered**: VectorBT is faster for mass parameter sweeps but has a steeper API. Backtrader is feature-rich but more verbose. Backtesting.py hits the sweet spot for this project.
-
----
-
-### 1.4 Performance Reporting
-
-#### New File: `src/classes/backtesting/performance.py`
-
-Uses [pyfolio](https://github.com/quantopian/pyfolio) for deep risk analytics.
-
-#### TODO Checklist
-
-- [ ] **1.4.1** Create `performance.py` with metrics calculation
-- [ ] **1.4.2** Compute core metrics: Sharpe ratio, Sortino ratio, max drawdown, win rate, profit factor, CAGR
-- [ ] **1.4.3** Generate tear sheet via pyfolio (drawdown plot, rolling Sharpe, monthly returns heatmap)
-- [ ] **1.4.4** Output CSV summary of per-trade P&L
-- [ ] **1.4.5** Integrate performance report into the email/PDF pipeline (leverage existing `output/email.py`)
-- [ ] **1.4.6** Add `--benchmark SPY` option to compare strategy returns against a benchmark
-
-#### Research Notes
-
-- **pyfolio** generates "tear sheets" — comprehensive visual reports showing returns, drawdown, exposure, and risk metrics. It accepts a Pandas Series of returns indexed by datetime.
-- The **Sharpe ratio** threshold: > 1.0 is acceptable, > 2.0 is good, > 3.0 is excellent. If backtesting reveals Sharpe < 0.5, the screener parameters need tuning.
-- **Profit factor** = gross profits / gross losses. Below 1.0 means the strategy loses money.
+- **Backtesting.py**: `init()` pre-computes indicators via `self.I()`. `next()` runs per bar. The `self.I()` wrapper requires arrays of the same length as data.
+- **Alternatives considered**: VectorBT (faster mass sweeps but steeper API), Backtrader (event-driven, verbose). Backtesting.py is best for this project's complexity level.
+- **Key metric thresholds**: Sharpe > 1.0 acceptable, > 2.0 good. Profit factor > 1.0 required.
 
 ---
 
 ### Phase 1 Test Plan
 
-- [ ] **1.T.1** Unit tests for `RiskManager` — verify stop-loss, position sizing, trailing stop calculations
-- [ ] **1.T.2** Unit tests for `TransactionCosts` — verify cost calculations for US and India presets
-- [ ] **1.T.3** Integration test: run backtest on 1 year of AAPL data with BreakoutScreener, verify report generates
-- [ ] **1.T.4** Smoke test: run full pipeline `python src/project_alpha.py --market us --backtest --top 5`
-- [ ] **1.T.5** Validate that existing tests still pass (no regressions to core pipeline)
+- [ ] **1.T.1** `pytest tests/unit/ --cov=src --cov-report=html` achieves ≥ 80% coverage
+- [ ] **1.T.2** Run backtest on 1 year AAPL with BreakoutScreener — verify HTML report generates
+- [ ] **1.T.3** Verify `Settings` loads from `.env` and CLI overrides work
+- [ ] **1.T.4** Verify structured logs output valid JSON with `--json-logs`
+- [ ] **1.T.5** Smoke test: `python src/project_alpha.py --market us --backtest --top 5`
+- [ ] **1.T.6** Verify all pre-existing tests still pass (no regressions)
 
 ---
 
-## Phase 2: Signal Quality Improvements
+# Phase 2: Signal Quality & Data Validation (Weeks 5–8)
 
-**Goal:** Reduce false signals by adding fundamental context, sentiment awareness, and cross-screener consensus.
-
-**Estimated Effort:** 3–4 weeks
+**Goal:** Reduce false signals, validate data integrity, and build cross-screener consensus.
 
 ---
 
-### 2.1 Breakout Confirmation Filters
+## §2.1 Data Validation Layer
 
-#### Modified File: `src/classes/screeners/breakout.py`
+> Addresses: **Production Gap #9 (🟡 Medium) — no validation → strict OHLCV rules**
 
-Add ADX and ATR-expansion checks to the existing `BreakoutScreener.screen()` method.
+### New Files
 
-#### TODO Checklist
-
-- [ ] **2.1.1** Add ADX calculation using `pandas_ta.adx(high, low, close, length=14)`
-- [ ] **2.1.2** Add ATR expansion check: require `atr_current > 1.5 × atr_20day_mean`
-- [ ] **2.1.3** Add configurable thresholds: `adx_min=20`, `atr_expansion_factor=1.5`
-- [ ] **2.1.4** Only emit BUY if existing breakout conditions AND confirmation filters pass
-- [ ] **2.1.5** Add trendline direction filter: only flag breakouts in the direction of the prevailing trend
-  ```python
-  # Cross-reference with TrendlineScreener
-  trend_result = TrendlineScreener().screen(ticker, data)
-  if trend_result.details["trend"] in ["Strong Down", "Weak Down"]:
-      return ScreenerResult(signal=Signal.HOLD, ...)  # Suppress counter-trend breakouts
-  ```
-- [ ] **2.1.6** Add optional TTM Squeeze detection (Bollinger inside Keltner)
-- [ ] **2.1.7** Update existing breakout tests to cover new confirmation logic
-- [ ] **2.1.8** Add new tests for edge cases (ADX exactly at threshold, ATR exactly at expansion ratio)
-
-#### Research Notes
-
-- **ADX > 20** confirms directional strength exists. ADX < 20 indicates a range-bound market where breakouts are more likely to fail.
-- **ATR expansion** measures whether volatility is increasing — a necessary condition for genuine breakouts vs. noise.
-- **TTM Squeeze**: Bollinger Band width < Keltner Channel width indicates compression. Release from squeeze + volume confirms breakout.
-
----
-
-### 2.2 Fundamental Post-Filter
-
-#### New File: `src/classes/filters/fundamental_filter.py`
-
-Uses [FundamentalAnalysis](https://github.com/JerBouma/FundamentalAnalysis) or [Finnhub](https://github.com/Finnhub-Stock-API/finnhub-python).
-
-```python
-class FundamentalFilter:
-    """Post-filter: suppress signals for fundamentally weak stocks."""
-    
-    def __init__(self, api_key: str, provider: str = "finnhub"):
-        ...
-    
-    def should_suppress(self, ticker: str, signal: Signal) -> bool:
-        """Return True if signal should be suppressed due to weak fundamentals."""
-        # For BUY signals: suppress if negative earnings growth or excessive debt
-        # For SELL signals: always allow
+```
+src/classes/data/
+├── __init__.py
+├── validators.py        # OHLCV validation rules
+└── schemas.py           # Pydantic models for price data
 ```
 
-#### TODO Checklist
+### TODO Checklist
 
-- [ ] **2.2.1** Create `src/classes/filters/__init__.py` and `fundamental_filter.py`
-- [ ] **2.2.2** Implement Finnhub provider — fetch P/E, earnings growth, debt-to-equity
+- [ ] **2.1.1** Create `validators.py` with OHLCV validation functions
+  ```python
+  from src.exceptions import DataValidationError
+  
+  def validate_ohlcv(df: pd.DataFrame, ticker: str) -> pd.DataFrame:
+      """Validate and clean OHLCV data. Raises DataValidationError on critical issues."""
+      errors = []
+      # Price sanity
+      if (df[["Open", "High", "Low", "Close"]] <= 0).any().any():
+          errors.append("Negative or zero prices detected")
+      # High >= Low invariant
+      if (df["High"] < df["Low"]).any():
+          errors.append("High < Low on some rows")
+      # Volume non-negative
+      if (df["Volume"] < 0).any():
+          errors.append("Negative volume detected")
+      # Sufficient data
+      if len(df) < 30:
+          errors.append(f"Only {len(df)} rows, need at least 30 trading days")
+      if errors:
+          raise DataValidationError(f"{ticker}: {'; '.join(errors)}")
+      return df
+  ```
+- [ ] **2.1.2** Create `schemas.py` with Pydantic model for price rows
+  ```python
+  from pydantic import BaseModel, validator
+  
+  class PriceRow(BaseModel):
+      date: datetime
+      open: float
+      high: float
+      low: float
+      close: float
+      volume: int
+      
+      @validator("high")
+      def high_gte_low(cls, v, values):
+          if "low" in values and v < values["low"]:
+              raise ValueError("high must be >= low")
+          return v
+  ```
+- [ ] **2.1.3** Integrate `validate_ohlcv()` into `Download.py` after data fetch
+- [ ] **2.1.4** Add auto-repair for common issues: fill missing dates, interpolate gaps ≤ 3 days
+- [ ] **2.1.5** Log validation warnings using structured logging (§1.3)
+- [ ] **2.1.6** Write tests with intentionally malformed data
+
+---
+
+## §2.2 Breakout Confirmation Filters
+
+### Modified File: [breakout.py](file:///opt/developments/project_alpha/src/classes/screeners/breakout.py)
+
+### TODO Checklist
+
+- [ ] **2.2.1** Add ADX calculation: `pandas_ta.adx(high, low, close, length=14)`
+- [ ] **2.2.2** Add ATR expansion check: `atr_current > 1.5 × atr_20d_mean`
+- [ ] **2.2.3** Add configurable thresholds: `adx_min=20`, `atr_expansion_factor=1.5` (sourced from Settings)
+- [ ] **2.2.4** Only emit BUY if existing conditions AND confirmation filters pass
+- [ ] **2.2.5** Add trendline direction filter: suppress breakouts opposite to prevailing trend
+- [ ] **2.2.6** Add optional TTM Squeeze detection (Bollinger inside Keltner)
+- [ ] **2.2.7** Update tests to cover confirmation logic
+- [ ] **2.2.8** Add edge case tests (ADX at threshold, ATR at expansion ratio)
+
+### Research Notes
+
+- **ADX > 20** = directional momentum exists. Below 20 = range-bound, breakouts more likely to fail.
+- **TTM Squeeze**: `bb_width < kc_width` indicates compression. Release + volume = genuine breakout.
+
+---
+
+## §2.3 Fundamental Post-Filter
+
+### New Files
+
+```
+src/classes/filters/
+├── __init__.py
+├── fundamental_filter.py
+└── sentiment_filter.py
+```
+
+### TODO Checklist
+
+- [ ] **2.3.1** Create `fundamental_filter.py` with Finnhub provider
   ```python
   import finnhub
-  client = finnhub.Client(api_key=api_key)
-  metrics = client.company_basic_financials(ticker, 'all')
+  
+  class FundamentalFilter:
+      def __init__(self, api_key: str):
+          self.client = finnhub.Client(api_key=api_key)
+      
+      def should_suppress(self, ticker: str, signal: Signal) -> bool:
+          metrics = self.client.company_basic_financials(ticker, 'all')['metric']
+          # Suppress BUY if: net income declining AND debt/equity > 2.0
+          ...
   ```
-- [ ] **2.2.3** Implement FundamentalAnalysis provider as fallback
-- [ ] **2.2.4** Define suppression rules:
+- [ ] **2.3.2** Implement FundamentalAnalysis library as fallback provider
+- [ ] **2.3.3** Define suppression rules:
 
-  | Signal | Suppress If |
-  |--------|------------|
+  | Signal Type | Suppress When |
+  |-------------|---------------|
   | BUY (Value) | Net income growth < 0 AND debt/equity > 2.0 |
   | BUY (Momentum) | Revenue declining 2+ consecutive quarters |
-  | BUY (Breakout) | P/E > 100 (speculative territory) |
+  | BUY (Breakout) | P/E > 100 (speculative) |
 
-- [ ] **2.2.5** Add caching layer — cache fundamentals for 24 hours (most data updates quarterly)
-- [ ] **2.2.6** Add `--fundamental-filter` and `--fmp-api-key` / `--finnhub-api-key` CLI options
-- [ ] **2.2.7** Handle graceful fallback when API key is not provided (skip filter, log warning)
-- [ ] **2.2.8** Write unit tests with mocked API responses
+- [ ] **2.3.4** Add 24-hour caching layer (fundamentals update quarterly)
+- [ ] **2.3.5** Add `--fundamental-filter` and `--finnhub-api-key` CLI options (key from Settings/env)
+- [ ] **2.3.6** Graceful fallback when API key not provided (skip filter, log warning)
+- [ ] **2.3.7** Write tests with mocked API responses
 
-#### Research Notes
+### Research Notes
 
-- **Finnhub** free tier: 60 calls/min, provides `company_basic_financials()` with 100+ metrics including revenueTTM, netIncomeTTM, debtToEquity, peRatio.
-- **FundamentalAnalysis** library uses Financial Modeling Prep API — free tier: 250 calls/day. Provides `financial_ratios()`, `key_metrics()`, `financial_statement_growth()`.
-- Caching is critical — for 500 stocks, uncached calls would exhaust free-tier limits.
+- **Finnhub** free tier: 60 calls/min. `company_basic_financials()` returns 100+ metrics.
+- **FundamentalAnalysis** uses FMP API — free: 250 calls/day. Good fallback.
 
 ---
 
-### 2.3 Sentiment Filter
+## §2.4 Sentiment Filter
 
-#### New File: `src/classes/filters/sentiment_filter.py`
+### New File: [sentiment_filter.py](file:///opt/developments/project_alpha/src/classes/filters/sentiment_filter.py)
 
-Uses [FinBERT](https://github.com/ProsusAI/finBERT) (ProsusAI/finbert on HuggingFace).
+### TODO Checklist
 
-```python
-from transformers import pipeline
-
-class SentimentFilter:
-    def __init__(self, model_name="ProsusAI/finbert"):
-        self.classifier = pipeline("sentiment-analysis", model=model_name)
-    
-    def get_sentiment(self, ticker: str, headlines: List[str]) -> SentimentResult:
-        results = self.classifier(headlines)
-        # Aggregate: count positive/negative/neutral, compute weighted score
-        ...
-    
-    def should_suppress(self, ticker: str, signal: Signal, headlines: List[str]) -> bool:
-        sentiment = self.get_sentiment(ticker, headlines)
-        # Suppress BUY if sentiment is strongly negative
-        if signal in (Signal.BUY, Signal.STRONG_BUY) and sentiment.score < -0.5:
-            return True
-        return False
-```
-
-#### TODO Checklist
-
-- [ ] **2.3.1** Create `sentiment_filter.py` with FinBERT pipeline
-- [ ] **2.3.2** Implement headline fetching — use `yfinance` news feed (already a dependency) as primary source
+- [ ] **2.4.1** Create `sentiment_filter.py` with FinBERT pipeline
   ```python
-  import yfinance as yf
-  stock = yf.Ticker(ticker)
-  headlines = [item['title'] for item in stock.news]
+  from transformers import pipeline
+  
+  class SentimentFilter:
+      def __init__(self, model_name="ProsusAI/finbert"):
+          self.classifier = pipeline("sentiment-analysis", model=model_name)
+      
+      def get_sentiment(self, headlines: List[str]) -> float:
+          results = self.classifier(headlines)
+          # Weighted average: positive=+1, neutral=0, negative=-1
+          ...
   ```
-- [ ] **2.3.3** Implement Finnhub news API as fallback headline source
-- [ ] **2.3.4** Implement sentiment aggregation: weighted average of FinBERT scores across recent headlines
-- [ ] **2.3.5** Define suppression thresholds:
-  - Suppress BUY if aggregate sentiment < −0.5 (strongly negative)
-  - Boost confidence if sentiment > +0.5 (strongly positive) aligns with BUY
-- [ ] **2.3.6** Add model caching — download FinBERT once, reuse from local cache
-- [ ] **2.3.7** Add `--sentiment-filter` CLI flag (disabled by default — requires ~500 MB model download)
-- [ ] **2.3.8** Handle case where no headlines are available (skip filter, don't suppress)
-- [ ] **2.3.9** Write unit tests with fixture headlines
+- [ ] **2.4.2** Implement headline fetching from `yfinance` (primary) and Finnhub (fallback)
+- [ ] **2.4.3** Implement suppression: suppress BUY if aggregate sentiment < −0.5
+- [ ] **2.4.4** Add model caching — download FinBERT once (~420 MB), reuse locally
+- [ ] **2.4.5** Add `--sentiment-filter` CLI flag (disabled by default)
+- [ ] **2.4.6** Handle no-headlines case gracefully (skip filter)
+- [ ] **2.4.7** Write tests with fixture headlines
 
-#### Research Notes
+### Research Notes
 
-- **FinBERT** (`ProsusAI/finbert`) outputs `{'label': 'positive/negative/neutral', 'score': 0.0-1.0}` per text input.
-- Model download is ~420 MB (first run only). Inference is fast: ~50ms per headline on CPU, ~5ms on GPU.
-- **yfinance news** returns 8–15 recent headlines per ticker. For deeper coverage, Finnhub's `/company-news` endpoint provides historical news.
+- **FinBERT** outputs `{'label': 'positive/negative/neutral', 'score': 0.0–1.0}`. ~50ms per headline on CPU.
+- `yfinance.Ticker(sym).news` returns 8–15 recent headlines. For historical, use Finnhub `/company-news`.
 
 ---
 
-### 2.4 Consensus Scoring Engine
+## §2.5 Consensus Scoring Engine
 
-#### New File: `src/classes/screeners/consensus.py`
+### New File: [consensus.py](file:///opt/developments/project_alpha/src/classes/screeners/consensus.py)
 
-```python
-class ConsensusScorer:
-    """Combines signals from all screeners + filters into a single weighted score."""
-    
-    WEIGHTS = {
-        "volatility": 0.30,
-        "breakout": 0.20,
-        "trendline": 0.15,
-        "macd": 0.10,
-        "donchian": 0.10,
-        "moving_average": 0.10,
-        "fundamental": 0.05,  # Only if enabled
-    }
-    
-    def score(self, results: Dict[str, ScreenerResult]) -> ConsensusResult:
-        ...
-```
+### TODO Checklist
 
-#### TODO Checklist
-
-- [ ] **2.4.1** Create `consensus.py` with `ConsensusScorer` class
-- [ ] **2.4.2** Implement weighted scoring: `score = Σ(weight × signal_value × confidence)`
-  - Signal values: STRONG_BUY=1.0, BUY=0.5, HOLD=0.0, SELL=−0.5, STRONG_SELL=−1.0
-- [ ] **2.4.3** Implement agreement detection — flag stocks where all screeners agree (high conviction)
-- [ ] **2.4.4** Implement contradiction detection — flag stocks where screeners disagree (low conviction, HOLD)
-- [ ] **2.4.5** Output consensus ranking with breakdown per screener
-- [ ] **2.4.6** Add `--consensus` flag to `project_alpha.py` — replaces individual screener output with unified ranking
-- [ ] **2.4.7** Add consensus column to CSV output and charts
-- [ ] **2.4.8** Write unit tests covering agreement, contradiction, and edge cases (missing screeners)
-
-#### Research Notes
-
-- The weighting scheme prioritises the volatility model (probabilistic, broadest view) and breakout (most actionable), with lower weight for individual technical indicators that can be noisy in isolation.
-- The consensus approach prevents acting on a single noisy signal, and contradictions cancel out naturally.
+- [ ] **2.5.1** Create `ConsensusScorer` class
+  ```python
+  WEIGHTS = {
+      "volatility": 0.30, "breakout": 0.20, "trendline": 0.15,
+      "macd": 0.10, "donchian": 0.10, "moving_average": 0.10,
+      "fundamental": 0.05,
+  }
+  ```
+- [ ] **2.5.2** Implement weighted scoring: `score = Σ(weight × signal_value × confidence)`
+- [ ] **2.5.3** Implement agreement detection (all screeners agree → high conviction)
+- [ ] **2.5.4** Implement contradiction detection (screeners disagree → HOLD)
+- [ ] **2.5.5** Output consensus ranking with per-screener breakdown
+- [ ] **2.5.6** Add `--consensus` flag, consensus column in CSV, consensus overlay on charts
+- [ ] **2.5.7** Write tests covering agreement, contradiction, missing screeners
 
 ---
 
 ### Phase 2 Test Plan
 
-- [ ] **2.T.1** Test breakout confirmation: verified breakouts (AAPL, TSLA known events) should pass; false breakouts should be caught
-- [ ] **2.T.2** Test fundamental filter: stocks with negative earnings should be suppressed for BUY signals
-- [ ] **2.T.3** Test sentiment filter: verify FinBERT correctly classifies sample financial headlines
-- [ ] **2.T.4** Test consensus scoring: verify arithmetic, agreement/contradiction detection
-- [ ] **2.T.5** End-to-end: run `--consensus --fundamental-filter` and verify output format
+- [ ] **2.T.1** Validation catches malformed OHLCV data and raises `DataValidationError`
+- [ ] **2.T.2** Breakout confirmation reduces false signals by ≥ 30% in historical data
+- [ ] **2.T.3** Fundamental filter correctly suppresses BUY for stocks with negative earnings
+- [ ] **2.T.4** FinBERT classifies sample financial headlines correctly
+- [ ] **2.T.5** Consensus scoring arithmetic is correct
+- [ ] **2.T.6** End-to-end: `--consensus --fundamental-filter` produces valid output
 
 ---
 
-## Phase 3: Infrastructure Hardening
+# Phase 3: Infrastructure & Production (Weeks 9–14)
 
-**Goal:** Make the system more reliable, adaptive, and statistically sound.
-
-**Estimated Effort:** 2–3 weeks
+**Goal:** Make the system production-grade with reliable data, market awareness, API access, monitoring, and security.
 
 ---
 
-### 3.1 Data Provider Chain
+## §3.1 Data Provider Chain
 
-#### New File: `src/classes/data/provider_chain.py`
+### New File: [provider_chain.py](file:///opt/developments/project_alpha/src/classes/data/provider_chain.py)
 
-```python
-class DataProviderChain:
-    """Tries data providers in order; falls back on failure."""
-    
-    def __init__(self, providers: List[str] = ["yfinance", "polygon", "alpha_vantage"]):
-        ...
-    
-    def fetch_historical(self, symbol, start, end, interval="1d") -> pd.DataFrame:
-        for provider in self.providers:
-            try:
-                df = self._fetch(provider, symbol, start, end, interval)
-                if len(df) > 0:
-                    return self._normalise_columns(df)
-            except Exception as e:
-                logger.warning(f"{provider} failed for {symbol}: {e}")
-        raise DataUnavailableError(f"All providers failed for {symbol}")
-```
+### TODO Checklist
 
-#### TODO Checklist
-
-- [ ] **3.1.1** Create `provider_chain.py` with abstract `DataProvider` base class
-- [ ] **3.1.2** Implement `YFinanceProvider` — wraps existing `yfinance` data fetching logic from `Download.py`
-- [ ] **3.1.3** Implement `PolygonProvider` — uses `polygon-api-client`
+- [ ] **3.1.1** Create abstract `DataProvider` base class
+- [ ] **3.1.2** Implement `YFinanceProvider` — wrap existing `Download.py` logic
+- [ ] **3.1.3** Implement `PolygonProvider`
   ```python
   from polygon import RESTClient
   client = RESTClient(api_key)
   aggs = client.get_aggs(ticker, 1, "day", start, end)
-  df = pd.DataFrame([vars(a) for a in aggs])
   ```
-- [ ] **3.1.4** Implement `AlphaVantageProvider` — uses `alpha_vantage` library
-- [ ] **3.1.5** Implement column normalisation — ensure all providers return `Open, High, Low, Close, Volume` with DatetimeIndex
-- [ ] **3.1.6** Add `--data-provider` and `--polygon-api-key` / `--av-api-key` CLI options
-- [ ] **3.1.7** Integrate `DataProviderChain` into `Download.py` (replace direct yfinance calls)
-- [ ] **3.1.8** Add rate limiting — respect per-provider API limits (Polygon: 5/min free, Alpha Vantage: 5/min)
-- [ ] **3.1.9** Write integration tests with mocked provider responses
-- [ ] **3.1.10** Add provider health check on startup — test connectivity, log available providers
+- [ ] **3.1.4** Implement `AlphaVantageProvider`
+- [ ] **3.1.5** Implement column normalisation — all providers return `Open, High, Low, Close, Volume` DatetimeIndex
+- [ ] **3.1.6** Integrate `validate_ohlcv()` from §2.1 into the provider chain
+- [ ] **3.1.7** Add rate limiting per provider (Polygon: 5/min, Alpha Vantage: 25/day)
+- [ ] **3.1.8** Replace direct yfinance calls in `Download.py` with `DataProviderChain`
+- [ ] **3.1.9** Add `--data-provider` and API key CLI options (keys from Settings)
+- [ ] **3.1.10** Add provider health check on startup
+- [ ] **3.1.11** Write integration tests with mocked provider responses
 
-#### Research Notes
+### Research Notes
 
-- **Polygon.io** free tier: EOD data, 5 API calls/minute. `pip install polygon-api-client`. Client: `RESTClient(api_key).get_aggs(ticker, multiplier, timespan, from, to)`.
-- **Alpha Vantage** free tier: 25 calls/day (reduced from 500 in 2024). `pip install alpha-vantage`. Consider as lowest-priority fallback.
-- Column normalisation is critical — yfinance returns `Adj Close`, Polygon returns `vw` (VWAP), Alpha Vantage returns numbered columns.
+- **Polygon.io** free tier: EOD data, 5 calls/min. `pip install polygon-api-client`.
+- **Alpha Vantage** free: 25 calls/day (reduced in 2024). Lowest-priority fallback.
+- Column normalisation is critical — yfinance gives `Adj Close`, Polygon gives `vw` (VWAP).
 
 ---
 
-### 3.2 Market Regime Detection
+## §3.2 Market Regime Detection
 
-#### New File: `src/classes/analysis/regime_detector.py`
+### New File: [regime_detector.py](file:///opt/developments/project_alpha/src/classes/analysis/regime_detector.py)
 
-Uses [hmmlearn](https://github.com/hmmlearn/hmmlearn) with a 3-state Gaussian Hidden Markov Model.
+### TODO Checklist
 
-```python
-from hmmlearn import hmm
-
-class RegimeDetector:
-    def __init__(self, n_regimes: int = 3):
-        self.model = hmm.GaussianHMM(
-            n_components=n_regimes,
-            covariance_type="full",
-            n_iter=1000,
-            random_state=42,
-        )
-    
-    def fit_predict(self, market_data: pd.DataFrame) -> RegimeResult:
-        # Features: log returns + rolling volatility
-        features = self._compute_features(market_data)
-        self.model.fit(features)
-        states = self.model.predict(features)
-        # Classify states by mean return: bull (highest), bear (lowest), neutral
-        ...
-```
-
-#### TODO Checklist
-
-- [ ] **3.2.1** Create `regime_detector.py` with `GaussianHMM` wrapper
-- [ ] **3.2.2** Implement feature engineering: log returns + 20-day rolling volatility as observable features
-- [ ] **3.2.3** Implement regime classification: label states by mean return
-  - State with highest mean return → **Bull**
-  - State with lowest mean return → **Bear**
-  - Remaining state → **Neutral/Sideways**
+- [ ] **3.2.1** Create `RegimeDetector` with 3-state `GaussianHMM`
+  ```python
+  from hmmlearn import hmm
+  
+  class RegimeDetector:
+      def __init__(self, n_regimes=3):
+          self.model = hmm.GaussianHMM(n_components=n_regimes, covariance_type="full", n_iter=1000)
+      
+      def fit_predict(self, market_data: pd.DataFrame) -> RegimeResult:
+          features = np.column_stack([log_returns, rolling_std_20d])
+          self.model.fit(features)
+          states = self.model.predict(features)
+          ...
+  ```
+- [ ] **3.2.2** Implement feature engineering: log returns + 20-day rolling volatility
+- [ ] **3.2.3** Classify states by mean return: Bull (highest) / Bear (lowest) / Neutral
 - [ ] **3.2.4** Implement regime-based signal adjustment:
 
   | Regime | Effect |
   |--------|--------|
   | Bull | Allow all signals, boost momentum confidence |
   | Neutral | Allow all signals at face value |
-  | Bear | Suppress all BUY signals, allow SELL only |
+  | Bear | Suppress BUY signals, allow SELL only |
 
-- [ ] **3.2.5** Add `--regime-detection` flag and `--regime-index SPY` option (which index to detect regime on)
-- [ ] **3.2.6** Generate regime overlay on existing charts (colour periods by regime)
-- [ ] **3.2.7** Write unit tests with synthetic bull/bear/sideways data
-- [ ] **3.2.8** Validate on historical S&P 500 data: does HMM correctly identify 2020 crash, 2022 bear market?
-
-#### Research Notes
-
-- **GaussianHMM** with `n_components=3` and `covariance_type="full"` is the standard setup. Features: `[log_return, rolling_std_20d]`.
-- Training uses Expectation-Maximisation (Baum-Welch). Typically converges in < 1 second for 5 years of daily data.
-- The regime is detected on a broad market index (SPY or ^NSEI), not individual stocks — individual stocks are too noisy for reliable regime detection.
+- [ ] **3.2.5** Add `--regime-detection` and `--regime-index SPY` options
+- [ ] **3.2.6** Generate regime overlay on charts (colour periods by regime)
+- [ ] **3.2.7** Write tests with synthetic bull/bear/sideways data
+- [ ] **3.2.8** Validate on historical S&P 500 (should detect 2020 crash, 2022 bear)
 
 ---
 
-### 3.3 Walk-Forward Validation
+## §3.3 Walk-Forward Validation
 
-#### New File: `src/classes/backtesting/walk_forward.py`
+### New File: [walk_forward.py](file:///opt/developments/project_alpha/src/classes/backtesting/walk_forward.py)
 
-```python
-class WalkForwardValidator:
-    """Anchored expanding-window walk-forward validation."""
-    
-    def __init__(self, train_start: str, initial_train_months: int = 12,
-                 test_months: int = 3, step_months: int = 3):
-        ...
-    
-    def validate(self, screener, ticker, data) -> WalkForwardResult:
-        """Run walk-forward: expand training window, test on next period, repeat."""
-        for train_end, test_start, test_end in self._generate_windows():
-            # Train/optimise on [train_start, train_end]
-            # Test on [test_start, test_end]
-            # Record out-of-sample performance
-            ...
-        return WalkForwardResult(oos_sharpe=..., oos_drawdown=..., ...)
+### TODO Checklist
+
+- [ ] **3.3.1** Create anchored expanding-window walk-forward validator
+  ```python
+  class WalkForwardValidator:
+      def __init__(self, initial_train_months=12, test_months=3, step_months=3):
+          ...
+      def validate(self, screener, ticker, data) -> WalkForwardResult:
+          """Train on expanding window, test on next period, repeat."""
+  ```
+- [ ] **3.3.2** Implement window generation (training starts fixed, end expands, test slides forward)
+- [ ] **3.3.3** Reuse `engine.py` from Phase 1 for per-window backtest
+- [ ] **3.3.4** Aggregate out-of-sample metrics across all windows
+- [ ] **3.3.5** Implement overfitting detection: OOS/IS Sharpe ratio < 0.5 = overfit warning
+- [ ] **3.3.6** Add `--walk-forward`, `--wf-train-months`, `--wf-test-months` options
+- [ ] **3.3.7** Generate walk-forward report: per-window performance + aggregate metrics
+- [ ] **3.3.8** Write tests verifying window arithmetic (no overlaps, no gaps)
+
+---
+
+## §3.4 Volatility Model Improvements
+
+### Modified Files: [VolatileConfig.py](file:///opt/developments/project_alpha/src/classes/analysis/VolatileConfig.py), [Models.py](file:///opt/developments/project_alpha/src/classes/Models.py)
+
+### TODO Checklist
+
+- [ ] **3.4.1** Warm-start default: reduce steps when `--load-model` is used (50000 → 10000)
+- [ ] **3.4.2** Add `--polynomial-order` CLI option to experiment with lower correlation orders
+- [ ] **3.4.3** Add validation loss tracking: 80/20 time-series split, log hold-out loss
+- [ ] **3.4.4** Log training time and convergence metrics to structured log
+- [ ] **3.4.5** Add GPU detection and auto-placement with `tf.config.list_physical_devices('GPU')`
+
+---
+
+## §3.5 Monitoring & Observability
+
+> Addresses: **Production Gap #3 (🔴 Critical) — no monitoring → full observability**
+
+### New Files
+
+```
+src/monitoring/
+├── __init__.py
+├── metrics.py               # Prometheus metrics definitions
+└── middleware.py             # FastAPI middleware for request metrics
+monitoring/
+├── prometheus/
+│   └── prometheus.yml        # Scrape config
+├── grafana/
+│   └── dashboards/
+│       ├── screener_signals.json
+│       └── data_pipeline.json
+└── alerting/
+    └── rules.yaml
 ```
 
-#### TODO Checklist
+### TODO Checklist
 
-- [ ] **3.3.1** Create `walk_forward.py` with window generation logic
-- [ ] **3.3.2** Implement anchored expanding window: training starts fixed, end expands by `step_months`; test window slides forward
-- [ ] **3.3.3** Implement per-window backtest execution — reuse `engine.py` from Phase 1
-- [ ] **3.3.4** Implement out-of-sample metric aggregation across all windows
-- [ ] **3.3.5** Implement overfitting detection: compare in-sample vs out-of-sample Sharpe ratio
-  - Ratio < 0.5 indicates significant overfitting
-- [ ] **3.3.6** Add `--walk-forward` flag and `--wf-train-months`, `--wf-test-months` options
-- [ ] **3.3.7** Generate walk-forward report: per-window performance + aggregate metrics
-- [ ] **3.3.8** Write tests with known-profitable and known-unprofitable strategies
+- [ ] **3.5.1** Create `src/monitoring/metrics.py` with Prometheus metrics
+  ```python
+  from prometheus_client import Counter, Histogram, Gauge
+  
+  SIGNALS_TOTAL = Counter('screener_signals_total', 'Signals per screener', ['screener', 'signal_type'])
+  DOWNLOAD_DURATION = Histogram('data_download_duration_seconds', 'Data fetch latency', ['provider'])
+  TRAINING_LOSS = Gauge('model_training_loss', 'Current training loss')
+  CACHE_HITS = Counter('cache_hits_total', 'Cache hit count', ['cache_type'])
+  SYMBOLS_PROCESSED = Counter('symbols_processed_total', 'Symbols screened')
+  ERRORS = Counter('errors_total', 'Errors by component', ['component'])
+  ```
+- [ ] **3.5.2** Instrument screeners: increment `SIGNALS_TOTAL` on each signal
+- [ ] **3.5.3** Instrument data fetching: observe `DOWNLOAD_DURATION` per request
+- [ ] **3.5.4** Instrument model training: set `TRAINING_LOSS` per training step
+- [ ] **3.5.5** Instrument caching: track hit/miss ratio
+- [ ] **3.5.6** Create Prometheus scrape config (`prometheus.yml`)
+- [ ] **3.5.7** Create Grafana dashboard: Screener Signals (signal counts, confidence distribution, top tickers)
+- [ ] **3.5.8** Create Grafana dashboard: Data Pipeline (download latency, provider errors, cache hit rate)
+- [ ] **3.5.9** Create alerting rules:
 
-#### Research Notes
+  | Alert | Condition |
+  |-------|-----------|
+  | DataFetchFailure | `increase(errors_total{component="download"}[5m]) > 10` |
+  | LowCacheHitRate | `cache_hits_total / (cache_hits + cache_misses) < 0.5` |
+  | ModelNotConverging | `model_training_loss > X after Y steps` |
 
-- **Anchored expanding window**: Train on `[T₀, T₀+12m]`, test on `[T₀+12m, T₀+15m]`. Next: train on `[T₀, T₀+15m]`, test on `[T₀+15m, T₀+18m]`. The training set always starts at T₀ and grows.
-- **Key metric**: Out-of-sample Sharpe ratio. If in-sample Sharpe is 2.0 but OOS is 0.3, the strategy is overfit.
-- `scikit-learn`'s `TimeSeriesSplit` can generate the windows; or implement manually for more control over the anchor point.
+- [ ] **3.5.10** Expose `/metrics` endpoint in FastAPI (§3.6)
+- [ ] **3.5.11** Write tests verifying metrics are incremented correctly
 
 ---
 
-### 3.4 Volatility Model Improvements
+## §3.6 API Layer (FastAPI)
 
-#### Modified File: `src/classes/analysis/VolatileConfig.py` and `src/classes/Models.py`
+> Addresses: **Production Gap #6 (🟠 High) — CLI-only → REST API**
 
-These are smaller, targeted changes to the existing model.
+### New Files
 
-#### TODO Checklist
+```
+src/api/
+├── __init__.py
+├── main.py                  # FastAPI app + startup
+├── routes/
+│   ├── screeners.py         # /api/v1/screeners/*
+│   ├── predictions.py       # /api/v1/predictions/*
+│   ├── backtest.py          # /api/v1/backtest/*
+│   └── health.py            # /api/v1/health
+├── schemas/
+│   ├── requests.py
+│   └── responses.py
+└── dependencies.py          # Dependency injection
+```
 
-- [ ] **3.4.1** Add warm-start default: when `--load-model` is used, reduce `correlation_steps` from 50000 to 10000
-- [ ] **3.4.2** Add `--polynomial-order` CLI option (default: keep current, allow user to experiment with lower orders)
-- [ ] **3.4.3** Add validation loss tracking: split time series 80/20, compute prediction loss on the 20% hold-out
-- [ ] **3.4.4** Log training time and convergence metrics to a structured log file
-- [ ] **3.4.5** Add GPU detection and automatic device placement
+### TODO Checklist
+
+- [ ] **3.6.1** Create `main.py` — FastAPI app with CORS, lifespan events, and `/metrics` endpoint
+- [ ] **3.6.2** Create `schemas/requests.py` and `responses.py` with Pydantic models
+- [ ] **3.6.3** Implement endpoints:
+
+  | Method | Endpoint | Purpose |
+  |--------|----------|---------|
+  | GET | `/api/v1/health` | Health check + version |
+  | GET | `/api/v1/screeners` | List available screeners |
+  | POST | `/api/v1/screeners/{name}/run` | Execute screener |
+  | GET | `/api/v1/predictions/{market}` | Get volatility predictions |
+  | POST | `/api/v1/backtest` | Run backtest on strategy |
+  | GET | `/api/v1/symbols/{market}` | List symbols for market |
+
+- [ ] **3.6.4** Create `dependencies.py` — DI for Settings, database, data providers
+- [ ] **3.6.5** Add request/response logging middleware using structlog (§1.3)
+- [ ] **3.6.6** Add `/metrics` Prometheus endpoint (§3.5)
+- [ ] **3.6.7** Add `uvicorn` startup command: `python -m src.api.main` or `uvicorn src.api.main:app`
+- [ ] **3.6.8** Write API integration tests with `TestClient`
+- [ ] **3.6.9** Generate OpenAPI spec (`/docs`) and export `openapi.yaml`
+
+---
+
+## §3.7 Security
+
+> Addresses: **Production Gap #7 (🟠 High) — no auth → API key/JWT**
+
+### New Files
+
+```
+src/security/
+├── __init__.py
+├── auth.py              # JWT + API key authentication
+├── secrets.py           # Environment-based secrets management
+└── rate_limiting.py     # Request throttling
+```
+
+### TODO Checklist
+
+- [ ] **3.7.1** Move email credentials from JSON to `.env` / `Settings` (§1.2)
+- [ ] **3.7.2** Create `auth.py` with API key authentication for FastAPI
   ```python
-  gpus = tf.config.list_physical_devices('GPU')
-  if gpus:
-      logger.info(f"Using GPU: {gpus[0].name}")
+  from fastapi.security import APIKeyHeader
+  
+  api_key_header = APIKeyHeader(name="X-API-Key")
+  
+  async def verify_api_key(api_key: str = Depends(api_key_header)):
+      if api_key != settings.api_key:
+          raise HTTPException(status_code=403, detail="Invalid API key")
   ```
+- [ ] **3.7.3** Add optional JWT authentication for multi-user scenarios
+- [ ] **3.7.4** Create `rate_limiting.py` — rate limit API endpoints (e.g., 60 req/min per key)
+- [ ] **3.7.5** Add input validation on all API endpoints (Pydantic handles most via FastAPI)
+- [ ] **3.7.6** Add audit logging for sensitive operations (model training, backtest runs)
+- [ ] **3.7.7** Write security tests (invalid key → 403, missing key → 401, rate limit → 429)
+
+---
+
+## §3.8 Scalability Foundation
+
+> Addresses: **Production Gap #8 (🟡 Medium) — single-threaded → async-ready**
+
+### TODO Checklist
+
+- [ ] **3.8.1** Refactor data fetching in `Download.py` to use `asyncio` + `aiohttp` for parallel downloads
+- [ ] **3.8.2** Refactor screener batch execution to use `concurrent.futures.ProcessPoolExecutor`
+- [ ] **3.8.3** Add optional Celery task queue for long-running operations (model training, full backtests)
+  ```python
+  # src/workers/celery_app.py
+  from celery import Celery
+  app = Celery('project_alpha', broker='redis://localhost:6379/0')
+  
+  @app.task
+  def run_screening_task(market, screeners, config):
+      ...
+  ```
+- [ ] **3.8.4** Add `--async` flag for async data fetching
+- [ ] **3.8.5** Add `docker-compose.yml` with Redis for Celery broker
+- [ ] **3.8.6** Write tests verifying async download produces same results as sync
+
+---
+
+## §3.9 Documentation
+
+> Addresses: **Production Gap #10 (🟡 Medium) — basic README → full developer docs**
+
+### New Files
+
+```
+docs/
+├── getting-started/
+│   ├── installation.md
+│   ├── quickstart.md
+│   └── configuration.md
+├── user-guide/
+│   ├── screeners.md
+│   ├── volatility-model.md
+│   ├── interpreting-signals.md
+│   └── backtesting.md          # NEW
+├── developer-guide/
+│   ├── architecture.md          # Existing, update
+│   ├── contributing.md
+│   ├── testing.md
+│   └── adding-screeners.md
+├── api-reference/
+│   └── openapi.yaml             # Auto-generated from FastAPI
+└── deployment/
+    ├── docker.md
+    └── kubernetes.md
+```
+
+### TODO Checklist
+
+- [ ] **3.9.1** Set up MkDocs with `mkdocs-material` theme
+- [ ] **3.9.2** Write `getting-started/` guides (installation, quickstart, configuration)
+- [ ] **3.9.3** Write `user-guide/` — explain each screener, volatility model, signal interpretation, backtesting
+- [ ] **3.9.4** Write `developer-guide/` — architecture (update existing), contributing, testing, adding screeners
+- [ ] **3.9.5** Export and include OpenAPI spec from FastAPI
+- [ ] **3.9.6** Write `deployment/` — Docker setup, optional Kubernetes deployment
+- [ ] **3.9.7** Add `mkdocs.yml` and `mkdocs serve` / `mkdocs build` commands
 
 ---
 
 ### Phase 3 Test Plan
 
-- [ ] **3.T.1** Test data provider chain: simulate yfinance failure, verify Polygon fallback works
-- [ ] **3.T.2** Test regime detector: verify correct classification on synthetic bull/bear/sideways data
-- [ ] **3.T.3** Test walk-forward: verify window generation arithmetic (correct dates, no overlap/gap)
-- [ ] **3.T.4** Test warm-start: verify reduced step count when loading saved model
-- [ ] **3.T.5** End-to-end: run full pipeline with `--regime-detection --walk-forward`
+- [ ] **3.T.1** Data provider chain: simulate yfinance failure → Polygon fallback works
+- [ ] **3.T.2** Regime detector: correct classification on synthetic data
+- [ ] **3.T.3** Walk-forward: window generation has no overlaps or gaps
+- [ ] **3.T.4** API endpoints return correct responses and status codes
+- [ ] **3.T.5** Security: invalid API key → 403, rate limit → 429
+- [ ] **3.T.6** Prometheus metrics are correctly incremented
+- [ ] **3.T.7** Async download produces identical results to sync
+- [ ] **3.T.8** MkDocs builds without errors
 
 ---
 
-## New Directory Structure
+## Complete New Directory Structure
 
 ```
-src/classes/
-├── analysis/
-│   ├── CorrelationAnalyzer.py     (existing)
-│   ├── TrendAnalyzer.py           (existing)
-│   ├── VolatileAnalyzer.py        (existing)
-│   ├── VolatileConfig.py          (existing — modified in 3.4)
-│   └── regime_detector.py         (NEW — Phase 3)
-├── backtesting/                   (NEW — Phase 1)
-│   ├── __init__.py
-│   ├── engine.py                  (backtest runner)
-│   ├── performance.py             (metrics + pyfolio reports)
-│   └── walk_forward.py            (NEW — Phase 3)
-├── data/
-│   └── provider_chain.py          (NEW — Phase 3)
-├── filters/                       (NEW — Phase 2)
-│   ├── __init__.py
-│   ├── fundamental_filter.py
-│   └── sentiment_filter.py
-├── risk/                          (NEW — Phase 1)
-│   ├── __init__.py
-│   ├── risk_manager.py
-│   └── transaction_costs.py
-├── screeners/
-│   ├── base.py                    (existing)
-│   ├── breakout.py                (existing — modified in 2.1)
-│   ├── consensus.py               (NEW — Phase 2)
-│   ├── donchian.py                (existing)
-│   ├── macd.py                    (existing)
-│   ├── moving_average.py          (existing)
-│   └── trendline.py               (existing)
-└── output/                        (existing — minor additions for reports)
+src/
+├── api/                         (NEW — Phase 3 §3.6)
+│   ├── main.py
+│   ├── routes/
+│   ├── schemas/
+│   └── dependencies.py
+├── config/                      (NEW — Phase 1 §1.2)
+│   ├── settings.py
+│   └── defaults.yaml
+├── exceptions.py                (NEW — Phase 1 §1.3)
+├── logging_config.py            (NEW — Phase 1 §1.3)
+├── monitoring/                  (NEW — Phase 3 §3.5)
+│   ├── metrics.py
+│   └── middleware.py
+├── security/                    (NEW — Phase 3 §3.7)
+│   ├── auth.py
+│   ├── secrets.py
+│   └── rate_limiting.py
+├── workers/                     (NEW — Phase 3 §3.8)
+│   ├── celery_app.py
+│   └── tasks/
+└── classes/
+    ├── analysis/
+    │   ├── regime_detector.py   (NEW — Phase 3 §3.2)
+    │   └── ... (existing)
+    ├── backtesting/             (NEW — Phase 1 §1.5)
+    │   ├── engine.py
+    │   ├── adapter.py
+    │   ├── performance.py
+    │   └── walk_forward.py      (NEW — Phase 3 §3.3)
+    ├── data/
+    │   ├── validators.py        (NEW — Phase 2 §2.1)
+    │   ├── schemas.py           (NEW — Phase 2 §2.1)
+    │   └── provider_chain.py    (NEW — Phase 3 §3.1)
+    ├── filters/                 (NEW — Phase 2 §2.3–2.4)
+    │   ├── fundamental_filter.py
+    │   └── sentiment_filter.py
+    ├── risk/                    (NEW — Phase 1 §1.4)
+    │   ├── risk_manager.py
+    │   └── transaction_costs.py
+    ├── screeners/
+    │   ├── consensus.py         (NEW — Phase 2 §2.5)
+    │   └── ... (existing)
+    └── output/                  (existing — minor additions)
+
+tests/                           (NEW structure — Phase 1 §1.1)
+├── conftest.py
+├── fixtures/
+├── unit/
+└── integration/
+
+monitoring/                      (NEW — Phase 3 §3.5)
+├── prometheus/
+├── grafana/
+└── alerting/
+
+docs/                            (EXPANDED — Phase 3 §3.9)
+├── getting-started/
+├── user-guide/
+├── developer-guide/
+├── api-reference/
+└── deployment/
 ```
 
 ---
 
-## Timeline Summary
+## Timeline
 
 ```mermaid
 gantt
-    title Implementation Timeline
+    title Unified Implementation Timeline
     dateFormat YYYY-MM-DD
-    
-    section Phase 1 - Backtesting + Risk
-    Risk Manager Module           :p1a, 2026-02-17, 5d
-    Transaction Cost Model        :p1b, after p1a, 3d
-    Backtesting Engine            :p1c, after p1b, 8d
-    Performance Reporting         :p1d, after p1c, 5d
-    Phase 1 Testing               :p1t, after p1d, 3d
-    
-    section Phase 2 - Signal Quality
-    Breakout Confirmation         :p2a, after p1t, 4d
-    Fundamental Filter            :p2b, after p1t, 5d
-    Sentiment Filter              :p2c, after p2b, 5d
-    Consensus Scoring             :p2d, after p2a, 5d
-    Phase 2 Testing               :p2t, after p2c, 3d
-    
-    section Phase 3 - Infrastructure
-    Data Provider Chain           :p3a, after p2t, 5d
-    Regime Detection              :p3b, after p2t, 4d
-    Walk-Forward Validation       :p3c, after p3a, 5d
-    Model Improvements            :p3d, after p3b, 3d
-    Phase 3 Testing               :p3t, after p3c, 3d
+
+    section Phase 1 — Foundation
+    Testing Infrastructure          :p1a, 2026-02-17, 5d
+    Configuration Management        :p1b, after p1a, 3d
+    Structured Logging & Errors     :p1c, after p1b, 2d
+    Risk Manager + Txn Costs        :p1d, after p1c, 5d
+    Backtesting Engine              :p1e, after p1d, 8d
+    Phase 1 Testing                 :p1t, after p1e, 3d
+
+    section Phase 2 — Signal Quality
+    Data Validation                 :p2a, after p1t, 3d
+    Breakout Confirmation           :p2b, after p2a, 4d
+    Fundamental Filter              :p2c, after p2a, 5d
+    Sentiment Filter                :p2d, after p2c, 5d
+    Consensus Scoring               :p2e, after p2b, 5d
+    Phase 2 Testing                 :p2t, after p2d, 3d
+
+    section Phase 3 — Infrastructure & Production
+    Data Provider Chain             :p3a, after p2t, 5d
+    Regime Detection                :p3b, after p2t, 4d
+    Walk-Forward Validation         :p3c, after p3a, 5d
+    Model Improvements              :p3d, after p3b, 3d
+    Monitoring & Observability      :p3e, after p3c, 5d
+    FastAPI Layer                   :p3f, after p3e, 5d
+    Security                        :p3g, after p3f, 4d
+    Scalability (Async + Celery)    :p3h, after p3g, 5d
+    Documentation (MkDocs)          :p3i, after p3h, 4d
+    Phase 3 Testing                 :p3t, after p3i, 3d
 ```
+
+**Total estimated effort: ~14 weeks / 70 developer days**
 
 ---
 
 ## Success Criteria
 
-| Metric | Target | Measured By |
-|--------|--------|-------------|
-| Backtest Sharpe ratio (best screener) | > 1.0 | Phase 1 backtest |
-| Backtest max drawdown | < 20% | Phase 1 backtest |
-| False breakout reduction | > 30% fewer signals | Phase 2 vs Phase 1 comparison |
-| Data provider uptime | 99%+ (with fallback) | Phase 3 monitoring |
-| Walk-forward OOS/IS Sharpe ratio | > 0.5 | Phase 3 validation |
-| All existing tests | Still passing | Every phase |
+| Metric | Target | Phase |
+|--------|--------|-------|
+| Test coverage | ≥ 80% | 1 |
+| All config from env/CLI, zero hardcoded secrets | ✅ | 1 |
+| Structured JSON logs | ✅ | 1 |
+| Backtest Sharpe ratio (best screener) | > 1.0 | 1 |
+| Max drawdown in backtest | < 20% | 1 |
+| OHLCV validation catches all malformed data | ✅ | 2 |
+| False breakout reduction | ≥ 30% fewer signals | 2 |
+| Consensus scoring working end-to-end | ✅ | 2 |
+| Data provider uptime with fallback | 99%+ | 3 |
+| Walk-forward OOS/IS Sharpe ratio | > 0.5 | 3 |
+| API responds to all endpoints | ✅ | 3 |
+| Prometheus metrics visible in Grafana | ✅ | 3 |
+| Auth rejects invalid API keys | ✅ | 3 |
+| MkDocs builds clean | ✅ | 3 |
+| All existing tests still passing | ✅ | Every phase |
