@@ -11,15 +11,15 @@ def mock_yf_ticker():
 
 @pytest.fixture
 def sample_price_data():
-    dates = pd.date_range("2023-01-01", periods=10)
+    dates = pd.date_range("2023-01-01", periods=50)
     # Distinct values to survive drop_duplicates
-    prices = [100.0 + i for i in range(10)]
+    prices = [100.0 + i for i in range(50)]
     df = pd.DataFrame({
         "Open": prices,
         "High": [p + 5 for p in prices],
         "Low": [p - 5 for p in prices],
         "Close": [p + 2 for p in prices],
-        "Volume": [10000 + i*100 for i in range(10)]
+        "Volume": [10000 + i*100 for i in range(50)]
     }, index=dates)
     return df
 
@@ -36,7 +36,7 @@ def test_fetch_one_success(mock_yf_ticker, sample_price_data):
     assert result.success is True
     assert result.ticker == "TEST"
     assert result.price_data is not None
-    assert len(result.price_data) == 10
+    assert len(result.price_data) == 50
     assert result.company_info == {"sector": "Technology"}
     assert result.retries == 0
 

@@ -53,6 +53,25 @@ file will be created automatically along with any missing parent directories.
 The `migrate_pickle_to_db.py` script converts existing pickle caches to the new
 format.
 
+## Docker Usage
+
+To run the application using Docker Compose:
+
+1.  **Configure Environment**:
+    Copy `.env.example` to `.env` and set your API keys.
+
+2.  **Build and Run**:
+    ```bash
+    docker-compose up --build
+    ```
+    This will start the application with default arguments (displaying help).
+
+3.  **Run Specific Command**:
+    To run a specific scan (e.g., US market, top 10 stocks):
+    ```bash
+    docker-compose run --rm app --market us --top 10
+    ```
+
 ## Output
 
 Processed charts and prediction tables are written to the `data/processed_data`

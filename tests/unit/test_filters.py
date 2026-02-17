@@ -60,6 +60,7 @@ def test_sentiment_filter_positive(mock_pipeline):
     ]
     mock_pipeline.return_value = mock_classifier
     
+    SentimentFilter._classifier = None # Reset singleton
     s = SentimentFilter()
     headlines = ["Great earnings", "Meeting tomorrow"]
     result = s.analyze_sentiment(headlines)
@@ -78,6 +79,7 @@ def test_sentiment_filter_negative(mock_pipeline):
     ]
     mock_pipeline.return_value = mock_classifier
     
+    SentimentFilter._classifier = None # Reset singleton
     s = SentimentFilter()
     headlines = ["Lawsuit filed", "CEO resigns"]
     result = s.analyze_sentiment(headlines)
@@ -91,6 +93,7 @@ def test_sentiment_filter_error_handling(mock_pipeline):
     """Test robust error handling."""
     mock_pipeline.side_effect = Exception("Model failed")
     
+    SentimentFilter._classifier = None # Reset singleton
     s = SentimentFilter()
     assert s.classifier is None
     
