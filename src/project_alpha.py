@@ -944,6 +944,9 @@ def run_screening(args):
                 create_batch_charts("Breakout screener", market, breakout_screener_out_symbols, data, breakout_screener_out_dir)
             if args.save_table:
                 tools.save_screener_results_to_csv(market, "screener_breakout", breakout_screener_out_symbols)
+                # Save detailed daily report
+                breakout_objects = [r for r in batch_result.buys if r.ticker in breakout_screener_out_symbols]
+                tools.save_daily_detailed_report(market, "screener_breakout", breakout_objects)
             if not args.quiet:
                 print_success(f"Found {len(breakout_screener_out_symbols)} breakout candidates")
         else:
@@ -991,6 +994,13 @@ def run_screening(args):
                 create_batch_charts("Trend screener", market, trend_screener_out_symbols, data, trend_screener_out_dir)
             if args.save_table:
                 trend_history_file = tools.save_screener_results_to_csv(market, "screener_trend", trend_screener_out_symbols)
+                # Save detailed daily report
+                # Reconstruct objects list matching the filtered symbols
+                trend_objects = []
+                for r in batch_result.buys:
+                    if r.ticker in trend_screener_out_symbols:
+                         trend_objects.append(r)
+                tools.save_daily_detailed_report(market, "screener_trend", trend_objects)
             if not args.quiet:
                 print_success(f"Found {len(trend_screener_out_symbols)} trending stocks")
             

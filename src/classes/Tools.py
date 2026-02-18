@@ -319,16 +319,97 @@ def save_screener_results_to_csv(market_name, screener_name, results):
     # Create the directory if it doesn't exist
     dirname = os.path.dirname(filename)
     os.makedirs(dirname, exist_ok=True)
+    
+    current_date_str = datetime.datetime.now().strftime("%Y-%m-%d")
+    current_datetime = datetime.datetime.now().strftime("%d-%m-%Y %H:%M:%S")
+    
+    # Read existing data to check for duplicates
+    rows = []
+    if os.path.exists(filename):
+        with open(filename, 'r', newline='') as f:
+            reader = csv.reader(f)
+            rows = list(reader)
+    
+    # Check if last row has the same date (DD-MM-YYYY check)
+    # detailed timestamp is at index 0
+    updated = False
+    if rows:
+        last_row = rows[-1]
+        if last_row:
+            try:
+                last_ts = last_row[0] # "dd-mm-yyyy HH:MM:SS"
+                last_date = last_ts.split(' ')[0]
+                current_date = current_datetime.split(' ')[0]
+                
+                if last_date == current_date:
+                    # Overwrite last row
+                    rows[-1] = [current_datetime] + results
+                    updated = True
+            except: pass
+            
+    if not updated:
+        rows.append([current_datetime] + results)
 
-    # Open the file in append mode
-    with open(filename, 'a', newline='') as csvfile:
+    # Write back
+    with open(filename, 'w', newline='') as csvfile:
         writer = csv.writer(csvfile)
-
-        # Write the results in a row in the following format: Date : Results.
-        current_datetime = datetime.datetime.now().strftime("%d-%m-%Y %H:%M:%S")
-        row = [current_datetime] + results
-        writer.writerow(row)
+        writer.writerows(rows)
+        
     return filename
+
+def save_daily_detailed_report(market_name, screener_name, results_objects):
+    """
+    Save detailed screener results (Price, Score, Metrics) to a daily CSV.
+    
+    Args:
+        market_name: Market
+        screener_name: Screener name
+        results_objects: List of ScreenerResult objects or dicts
+    """
+    if not results_objects:
+        return
+        
+    today = datetime.datetime.now().strftime("%Y-%m-%d")
+    dirname = f"data/historic_results/{market_name}/{screener_name}_details"
+    os.makedirs(dirname, exist_ok=True)
+    filename = f"{dirname}/{today}.csv"
+    
+    try:
+        data_list = []
+        for r in results_objects:
+            # Handle ScreenerResult object
+            if hasattr(r, 'to_dict'):
+                item = r.to_dict()
+            elif hasattr(r, '__dict__'):
+                item = r.__dict__
+            elif isinstance(r, dict):
+                item = r
+            else:
+                continue
+                
+            # Flatten details if present
+            if 'details' in item and isinstance(item['details'], dict):
+                for k, v in item['details'].items():
+                    item[k] = v
+                del item['details']
+                
+            data_list.append(item)
+            
+        if data_list:
+            df = pd.DataFrame(data_list)
+            # Prioritize columns
+            cols = list(df.columns)
+            if 'ticker' in cols:
+                cols.insert(0, cols.pop(cols.index('ticker')))
+            if 'symbol' in cols and 'ticker' not in cols:
+                cols.insert(0, cols.pop(cols.index('symbol')))
+                
+            df = df[cols]
+            df.to_csv(filename, index=False)
+            # print(f"Saved detailed daily report to {filename}")
+            
+    except Exception as e:
+        print(f"Error saving detailed report: {e}")
 
 def find_common_symbols(csv_file, n):
     # Check if the file exists
