@@ -69,9 +69,13 @@ class TrendlineScreener(BaseScreener):
             trend_data = trend_data.fillna(0)
             trend_data = trend_data.replace([np.inf, -np.inf], 0)
             
+            # Normalize prices to percentage change from start of period
+            # This fixes the bias towards high-priced stocks
+            y_raw = trend_data["Close"].values
+            y = (y_raw / y_raw[0]) * 100
+            
             # Calculate slope using linear regression
-            x = trend_data.index.values
-            y = trend_data["Close"].values
+            x = np.arange(len(y))  # Use 0, 1, 2... for consistent X-axis scale
             
             if len(x) < 2:
                 return ScreenerResult(
