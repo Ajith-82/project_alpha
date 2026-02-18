@@ -1,0 +1,25 @@
+services:
+  app:
+    # Use image from GitHub Container Registry for deployment
+    # Replace 'username' with your GitHub username
+    image: ghcr.io/${GITHUB_REPOSITORY:-username/project_alpha}:latest
+    build: .  # Keep build context for local development convenience
+    container_name: project_alpha
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 4G
+        reservations:
+          memory: 2G
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    env_file:
+      - .env
+    environment:
+      - DATA_DIR=/app/data
+      - LOG_DIR=/app/logs
+    # Default command runs the help message. Override for specific tasks.
+    command: ["--help"] 

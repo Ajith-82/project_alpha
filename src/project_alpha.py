@@ -20,6 +20,9 @@ Examples:
 """
 
 import os
+import structlog
+from datetime import datetime
+import pandas as pd
 
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
 os.environ["OMP_NUM_THREADS"] = "4"
@@ -62,6 +65,14 @@ click.rich_click.OPTION_GROUPS = {
             "options": ["--load-model", "--save-model"],
         },
         {
+            "name": "Risk Management",
+            "options": ["--risk-per-trade", "--atr-multiplier", "--max-positions"],
+        },
+        {
+            "name": "Backtesting",
+            "options": ["--backtest", "--initial-capital", "--benchmark"],
+        },
+        {
             "name": "Additional Features",
             "options": ["--value"],
         },
@@ -71,6 +82,17 @@ click.rich_click.OPTION_GROUPS = {
 from classes.Download import load_data, load_volatile_data
 from classes.Volatile import volatile
 from classes.screeners import BreakoutScreener, TrendlineScreener
+from classes.screeners.consensus import ConsensusEngine
+from classes.filters.fundamental_filter import FundamentalFilter
+from classes.filters.sentiment_filter import SentimentFilter
+from classes.backtesting.engine import BacktestEngine, ProjectAlphaStrategy
+from classes.backtesting.performance import BacktestPerformance
+from classes.backtesting.walk_forward import WalkForwardValidator
+from classes.data.news_fetcher import NewsFetcher
+
+from classes.analysis.regime import RegimeDetector
+
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from classes.output import (
     create_batch_charts,
     console, print_banner, print_section, print_success, print_error,
@@ -79,6 +101,8 @@ from classes.output import (
 )
 import classes.IndexListFetcher as Index
 import classes.Tools as tools
+from config.settings import settings
+from logging_config import configure_logging
 
 
 # Available screeners
@@ -102,7 +126,7 @@ def validate_screeners(ctx, param, value):
 @click.option(
     "-m", "--market",
     type=click.Choice(["us", "india"], case_sensitive=False),
-    default="us",
+    default=settings.market,
     show_default=True,
     help="Market to analyze. **us** = S&P 500, **india** = NSE 500",
 )
@@ -188,6 +212,18 @@ def validate_screeners(ctx, param, value):
     help="Minimal output (errors only)",
 )
 @click.option(
+    "--json-logs",
+    is_flag=True,
+    default=False,
+    help="Output logs in JSON format",
+)
+@click.option(
+    "--log-level",
+    type=click.Choice(["DEBUG", "INFO", "WARNING", "ERROR"], case_sensitive=False),
+    default="INFO",
+    help="Set log level",
+)
+@click.option(
     "--no-banner",
     is_flag=True,
     default=False,
@@ -226,10 +262,111 @@ def validate_screeners(ctx, param, value):
     default=False,
     help="Include value stocks from external screener sources (India only)",
 )
+@click.option(
+    "--fundamental/--no-fundamental",
+    default=False,
+    help="Enable fundamental analysis filtering (requires Finnhub API Key)",
+)
+@click.option(
+    "--sentiment/--no-sentiment",
+    default=False,
+    help="Enable sentiment analysis filtering (uses FinBERT)",
+)
+@click.option(
+    "--consensus/--no-consensus",
+    default=False,
+    help="Enable consensus scoring (runs all screeners and aggregates signals)",
+)
+@click.option(
+    "--risk-per-trade",
+    type=float,
+    default=settings.risk_per_trade,
+    help="Risk per trade (decimal, e.g., 0.01 for 1%)",
+)
+@click.option(
+    "--atr-multiplier",
+    type=float,
+    default=settings.atr_multiplier,
+    help="ATR multiplier for stop-loss calculation",
+)
+@click.option(
+    "--max-positions",
+    type=int,
+    default=settings.max_positions,
+    help="Maximum number of concurrent open positions",
+)
+@click.option(
+    "--backtest",
+    is_flag=True,
+    default=False,
+    help="Run backtest on selected symbols/market",
+)
+@click.option(
+    "--initial-capital",
+    type=float,
+    default=10000.0,
+    help="Initial capital for backtest",
+)
+@click.option(
+    "--benchmark",
+    type=str,
+    default="SPY",
+    help="Benchmark symbol for comparison",
+)
+@click.option(
+    "--data-provider",
+    type=click.Choice(["yfinance", "polygon"], case_sensitive=False),
+    default=settings.data_provider,
+    show_default=True,
+    help="Data provider for historical data",
+)
+@click.option(
+    "--polygon-api-key",
+    type=str,
+    default=settings.polygon_api_key,
+    envvar="PA_POLYGON_API_KEY",
+    help="API key for Polygon.io (overrides settings)",
+)
+@click.option(
+    "--regime-detection",
+    is_flag=True,
+    default=False,
+    help="Enable market regime detection (Bull/Bear/Sideways)",
+)
+@click.option(
+    "--regime-index",
+    type=str,
+    default="SPY",
+    help="Index symbol for regime detection (default: SPY)",
+)
+@click.option(
+    "--walk-forward",
+    is_flag=True,
+    default=False,
+    help="Run Walk-Forward Validation instead of single backtest",
+)
+@click.option(
+    "--wf-train-months",
+    type=int,
+    default=12,
+    help="Training window size in months for Walk-Forward Validation",
+)
+@click.option(
+    "--wf-test-months",
+    type=int,
+    default=3,
+    help="Testing window size in months for Walk-Forward Validation",
+)
+@click.option("--strict", is_flag=True, help="Enable stricter filtering for high-quality signals only")
 @click.version_option(version="0.1.0", prog_name="Project Alpha")
 def cli(market, symbols, screeners, rank, top, min_price, max_price, output_format,
-        save_table, no_plots, plot_losses, verbose, quiet, no_banner, cache,
-        db_path, load_model, save_model, value):
+        save_table, no_plots, plot_losses, verbose, quiet, json_logs, log_level, no_banner, cache,
+        db_path, load_model, save_model, value, fundamental, sentiment, consensus, risk_per_trade, atr_multiplier, max_positions,
+        backtest, initial_capital, benchmark, data_provider, polygon_api_key, regime_detection, regime_index,
+        walk_forward, wf_train_months, wf_test_months, strict):
+
+
+
     """
     🚀 **Project Alpha** - Your Day-to-Day Trading Companion
     
@@ -243,9 +380,15 @@ def cli(market, symbols, screeners, rank, top, min_price, max_price, output_form
     
     **Quick Start:**
     
-        $ python project_alpha.py --market us
-        $ python project_alpha.py --market india --screeners volatility,trend
     """
+    # Configure logging
+    if verbose:
+        log_level = "DEBUG"
+    elif quiet:
+        log_level = "WARNING"
+    
+    configure_logging(level=log_level, json_output=json_logs)
+    
     # Create args namespace for backward compatibility
     class Args:
         pass
@@ -270,6 +413,27 @@ def cli(market, symbols, screeners, rank, top, min_price, max_price, output_form
     args.load_model = load_model
     args.save_model = save_model
     args.value = value
+    args.fundamental = fundamental
+    args.sentiment = sentiment
+    args.consensus = consensus
+    args.risk_per_trade = risk_per_trade
+    args.atr_multiplier = atr_multiplier
+    args.max_positions = max_positions
+    args.backtest = backtest
+    args.initial_capital = initial_capital
+    args.benchmark = benchmark
+    args.data_provider = data_provider
+    args.polygon_api_key = polygon_api_key
+    args.regime_detection = regime_detection
+    args.regime_index = regime_index
+    args.walk_forward = walk_forward
+    args.wf_train_months = wf_train_months
+    args.wf_test_months = wf_test_months
+    args.strict = strict
+    args.settings = settings
+
+
+
     
     # Run main with enhanced args
     run_screening(args)
@@ -277,7 +441,7 @@ def cli(market, symbols, screeners, rank, top, min_price, max_price, output_form
 
 def screener_value_charts(cache, market: str, index: str, symbols: list, db_path: str = None):
     """Generate value stock charts for a given market and symbols."""
-    historic_data_dir = f"data/historic_data/{market}"
+    historic_data_dir = os.path.join(settings.data_dir, "historic_data", market)
     os.makedirs(historic_data_dir, exist_ok=True)
     
     file_prefix = f"{index}_data"
@@ -286,10 +450,115 @@ def screener_value_charts(cache, market: str, index: str, symbols: list, db_path
     price_data = data["price_data"]
     value_symbols = data["tickers"]
     
-    processed_data_dir = f"data/processed_data/{index}"
+    processed_data_dir = os.path.join(settings.data_dir, "processed_data", index)
     os.makedirs(processed_data_dir, exist_ok=True)
     
     create_batch_charts("IND_screener_value_stocks", market, value_symbols, {"price_data": price_data}, processed_data_dir)
+
+
+def apply_filters(symbols, args, filter_cache=None):
+    """
+    Apply additional filters (Fundamental, Sentiment) to a list of symbols.
+    
+    Args:
+        symbols: List of ticker symbols
+        args: CLI arguments
+        filter_cache: Optional dict to store filter results {ticker: {filter_name: score}}
+        
+    Returns:
+        List of filtered symbols
+    """
+    if not symbols:
+        return []
+        
+    filtered_symbols = symbols.copy()
+    
+    # Fundamental Analysis
+    if args.fundamental:
+        if not args.quiet:
+            print_info(f"Running fundamental analysis on {len(filtered_symbols)} symbols...")
+            
+        fundamental_filter = FundamentalFilter()
+        passed_fundamental = []
+        
+        with create_download_progress() as progress:
+            task = progress.add_task("[cyan]Checking Fundamentals...", total=len(filtered_symbols))
+            
+            for ticker in filtered_symbols:
+                result = fundamental_filter.check_health(ticker)
+                
+                # Cache result if container provided
+                if filter_cache is not None:
+                    if ticker not in filter_cache:
+                        filter_cache[ticker] = {}
+                    # Simple mapping: passed = 1.0, failed = 0.0
+                    filter_cache[ticker]["fundamental"] = 1.0 if result["passed"] else 0.0
+                    
+                if result["passed"]:
+                    passed_fundamental.append(ticker)
+                progress.advance(task)
+                
+        if not args.quiet:
+            print_success(f"Fundamental filter: {len(passed_fundamental)}/{len(filtered_symbols)} passed")
+        filtered_symbols = passed_fundamental
+
+    # Sentiment Analysis
+    if args.sentiment and filtered_symbols:
+        if not args.quiet:
+            print_info(f"Running sentiment analysis on {len(filtered_symbols)} symbols...")
+            
+        sentiment_filter = SentimentFilter()
+        passed_sentiment = []
+        
+        sentiment_filter = SentimentFilter()
+        news_fetcher = NewsFetcher()
+        passed_sentiment = []
+        
+        def process_sentiment(ticker):
+             try:
+                 headlines = news_fetcher.fetch_headlines(ticker)
+                 if not headlines:
+                     return ticker, None
+                 return ticker, sentiment_filter.analyze_sentiment(headlines)
+             except Exception as e:
+                 return ticker, None
+
+        with create_download_progress() as progress:
+            task = progress.add_task("[cyan]Checking Sentiment...", total=len(filtered_symbols))
+            
+            with ThreadPoolExecutor(max_workers=5) as executor:
+                futures = {executor.submit(process_sentiment, t): t for t in filtered_symbols}
+                
+                for future in as_completed(futures):
+                    ticker, result = future.result()
+                    
+                    if result:
+                        # Cache result/score logic
+                        if filter_cache is not None:
+                            if ticker not in filter_cache:
+                                filter_cache[ticker] = {}
+                            
+                            sent_score = 0.5
+                            if result["label"] == "positive":
+                                sent_score = 0.5 + (result["score"] * 0.5)
+                            elif result["label"] == "negative":
+                                sent_score = 0.5 - (result["score"] * 0.5)
+                            
+                            filter_cache[ticker]["sentiment"] = sent_score
+                            
+                        if result["label"] != "negative":
+                            passed_sentiment.append(ticker)
+                    else:
+                        # Fallback for no news or error: Pass
+                        passed_sentiment.append(ticker)
+                        
+                    progress.advance(task)
+
+        if not args.quiet:
+            print_success(f"Sentiment filter: {len(passed_sentiment)}/{len(filtered_symbols)} passed")
+        filtered_symbols = passed_sentiment
+        
+    return filtered_symbols
 
 
 def run_screening(args):
@@ -309,15 +578,55 @@ def run_screening(args):
     db_path = args.db_path
     results = {}  # Track screener results
     screeners_to_run = args.screeners if hasattr(args, 'screeners') else ["all"]
+    current_regime = "Unknown"
     
     # Cleanup report directories
-    tools.cleanup_directory_files("data/processed_data")
+    tools.cleanup_directory_files(os.path.join(settings.data_dir, "processed_data"))
     if not args.quiet:
         print_success("Cleaned up previous report directories")
     
     # Load market data
     if not args.quiet:
         print_section("Loading Market Data", "📥")
+    
+    # Market Regime Detection
+    if args.regime_detection:
+        if not args.quiet:
+             print_info(f"Detecting market regime using {args.regime_index}...")
+        
+        try:
+             # Load index data
+            regime_data = load_data(
+                cache, 
+                [args.regime_index], 
+                market, 
+                f"regime_{args.regime_index}", 
+                os.path.join(settings.data_dir, "historic_data", "regime"),
+                db_path=db_path,
+                provider=args.data_provider,
+                api_key=args.polygon_api_key
+            )
+            
+            if args.regime_index in regime_data["price_data"]:
+                index_df = regime_data["price_data"][args.regime_index]
+                
+                detector = RegimeDetector()
+                detector.fit(index_df)
+                
+                # Predict (get last state)
+                result = detector.predict(index_df)
+                current_regime = result["Regime"].iloc[-1]
+                
+                if not args.quiet:
+                    color = "green" if current_regime == "Bull" else "red" if current_regime == "Bear" else "yellow"
+                    print_info(f"Current Market Regime: [{color}]{current_regime}[/{color}]")
+                    
+            else:
+                 print_warning(f"Could not load data for {args.regime_index}, skipping regime detection.")
+                 
+        except Exception as e:
+            print_error(f"Regime detection failed: {e}")
+
     
     if market == "india":
         index, symbols = Index.nse_500()
@@ -334,11 +643,30 @@ def run_screening(args):
             print_info(f"Loading S&P 500 index ({len(symbols)} stocks)")
 
     # Create data directories
-    data_dir = f"data/historic_data/{market}"
+    data_dir = os.path.join(settings.data_dir, "historic_data", market)
     os.makedirs(data_dir, exist_ok=True)
     
     file_prefix = f"{index}_data"
-    data = load_data(cache, symbols, market, file_prefix, data_dir, db_path=db_path)
+    
+    # Optimization: If specific symbols requested, only load/download those
+    if args.symbols and len(args.symbols) > 0:
+        symbols = args.symbols
+        # Use a different prefix to avoid overwriting the full market cache
+        file_prefix = f"{index}_custom_{len(symbols)}_data"
+        if not args.quiet:
+            print_info(f"Analyzing {len(symbols)} specific symbols: {', '.join(symbols[:5])}...")
+    
+    data = load_data(
+        cache, 
+        symbols, 
+        market, 
+        file_prefix, 
+        data_dir, 
+        db_path=db_path,
+        provider=args.data_provider,
+        api_key=args.polygon_api_key
+    )
+
     
     total_stocks = len(data.get("tickers", []))
     if not args.quiet:
@@ -354,6 +682,152 @@ def run_screening(args):
     
     # Determine which screeners to run
     run_all = "all" in screeners_to_run
+
+    # Track results for consensus engine
+    from collections import defaultdict
+    all_screener_results = defaultdict(dict)
+    global_filter_results = {} # Cache for filter scores {ticker: {filter_name: score}}
+
+    # Backtesting Mode
+    if getattr(args, 'backtest', False) or getattr(args, 'walk_forward', False):
+        if not args.quiet:
+            print_section("Backtesting Mode", "🧪")
+        
+        backtest_results = []
+        
+        # Determine which screener to backtest
+        screener_cls = BreakoutScreener
+        if "trend" in screeners_to_run and "breakout" not in screeners_to_run:
+            screener_cls = TrendlineScreener
+            
+        tickers = data.get("tickers", [])
+        if args.symbols:
+            tickers = args.symbols
+            
+        # Limit tickers if --top is set
+        if args.top:
+            tickers = tickers[:args.top]
+
+        # Walk-Forward Validation
+        if getattr(args, 'walk_forward', False):
+             if not args.quiet:
+                print_info(f"Running Walk-Forward Validation on {len(tickers)} symbols...")
+                print_info(f"Window: Train {args.wf_train_months}m / Test {args.wf_test_months}m")
+            
+             for ticker in tickers: # Iterate tickers manually as WFV is per-ticker usually
+                 if ticker not in data["price_data"]:
+                     continue
+                     
+                 # Get data for ticker
+                 df = data["price_data"][ticker]
+                 if df.empty:
+                     continue
+                 
+                 try:
+                     validator = WalkForwardValidator(
+                         df, 
+                         train_period_days=args.wf_train_months*30, 
+                         test_period_days=args.wf_test_months*30,
+                         initial_capital=args.initial_capital
+                     )
+                     
+                     results = validator.validate(screener_cls)
+                     summary = validator.get_summary()
+                     
+                     if not args.quiet:
+                         print_success(f"WFV Complete for {ticker}")
+                         print(summary) # Simple print for now
+                         
+                 except Exception as e:
+                     print_error(f"WFV failed for {ticker}: {e}")
+                     
+             return # Stop after WFV for now
+
+            
+        if not args.quiet:
+            print_info(f"Backtesting {len(tickers)} symbols with {screener_cls.__name__}...")
+
+            
+        # Create progress bar
+        with create_download_progress() as progress:
+            task = progress.add_task("[cyan]Running Backtests...", total=len(tickers))
+            
+            logger = structlog.get_logger()
+            
+            for ticker in tickers:
+                try:
+                    df = data.get("price_data", {}).get(ticker)
+                    if df is None or len(df) < 100:
+                         progress.advance(task)
+                         continue
+                    
+                    # Ensure index is DatetimeIndex
+                    if not isinstance(df.index, pd.DatetimeIndex):
+                        df.index = pd.to_datetime(df.index)
+                    
+                    # Ensure numeric columns
+                    cols = ['Open', 'High', 'Low', 'Close', 'Volume']
+                    for col in cols:
+                        if col in df.columns:
+                            df[col] = pd.to_numeric(df[col], errors='coerce')
+                        
+                    engine = BacktestEngine(df, initial_capital=args.initial_capital)
+                    bt, stats = engine.run(strategy_class=ProjectAlphaStrategy, screener_cls=screener_cls)
+                    
+                    metrics = BacktestPerformance.extract_metrics(stats, ticker, screener_cls.__name__)
+                    backtest_results.append(metrics)
+                    
+                except Exception as e:
+                    logger.error(f"Backtest failed for {ticker}: {e}")
+                
+                progress.advance(task)
+                
+        # Display results summary
+        if backtest_results:
+            # Sort by Return %
+            backtest_results.sort(key=lambda x: x.return_pct or -999, reverse=True)
+            
+            # Print table
+            from rich.table import Table
+            table = Table(title=f"Backtest Results ({screener_cls.__name__})")
+            table.add_column("Ticker", style="cyan")
+            table.add_column("Return %", style="green")
+            table.add_column("Sharpe", style="magenta")
+            table.add_column("Max DD %", style="red")
+            table.add_column("Trades", style="blue")
+            table.add_column("Win Rate %", style="yellow")
+            
+            for res in backtest_results[:20]: # Show top 20
+                table.add_row(
+                    res.ticker,
+                    f"{res.return_pct:.2f}%",
+                    f"{res.sharpe_ratio:.2f}",
+                    f"{res.max_drawdown_pct:.2f}%",
+                    str(res.trade_count),
+                    f"{res.win_rate_pct:.2f}%"
+                )
+            
+            console.print(table)
+            
+            # Save comprehensive CSV
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            csv_path = os.path.join(settings.data_dir, "backtests", f"backtest_summary_{timestamp}.csv")
+            os.makedirs(os.path.dirname(csv_path), exist_ok=True)
+            
+            # Convert list of dataclasses to DataFrame
+            # import pandas as pd  <-- Removed
+            # Handle potential missing attributes or serialization issues
+            try:
+                # Use vars() only if it's a dataclass instance
+                results_data = [vars(r) for r in backtest_results]
+                results_df = pd.DataFrame(results_data)
+                results_df.to_csv(csv_path, index=False)
+                print_success(f"Backtest summary saved to {csv_path}")
+            except Exception as e:
+                logger.error(f"Failed to save CSV: {e}")
+
+        # Exit after backtest
+        return
     
     # Volatility Screening
     if run_all or "volatility" in screeners_to_run:
@@ -363,6 +837,18 @@ def run_screening(args):
         
         volatile_data = load_volatile_data(market, data)
         volatile_df = volatile(args, volatile_data)
+        
+        # Prepare metadata for emails
+        vol_meta = {}
+        if not volatile_df.empty:
+            for _, row in volatile_df.iterrows():
+                vol_meta[row["SYMBOL"]] = {
+                    "Growth": f"{row['GROWTH']:.4f}",
+                    "Vol": f"{row['VOLATILITY']:.4f}",
+                    "Rate": row["RATE"],
+                    "Regime": current_regime
+                }
+
         volatile_symbols_top = volatile_df["SYMBOL"].head(200).tolist()
         volatile_symbols_bottom = volatile_df["SYMBOL"].tail(200).tolist()
         
@@ -375,8 +861,11 @@ def run_screening(args):
         # 2. VALUE (Mean-reversion): BELOW TREND or HIGHLY BELOW TREND (undervalued)
         # 3. BREAKOUT: Low VOLATILITY + ALONG TREND (consolidating, ready to break)
         
+        trend_threshold = 0.003 if args.strict else 0.001
+        breakout_vol_threshold = 0.10 if args.strict else 0.15
+        
         trend_candidates = volatile_df[
-            (volatile_df["GROWTH"] > 0.001) & 
+            (volatile_df["GROWTH"] > trend_threshold) & 
             (volatile_df["VOLATILITY"] > 0.10)
         ]["SYMBOL"].head(50).tolist()
         
@@ -386,7 +875,7 @@ def run_screening(args):
         
         breakout_candidates = volatile_df[
             (volatile_df["RATE"] == "ALONG TREND") & 
-            (volatile_df["VOLATILITY"] < 0.15) &
+            (volatile_df["VOLATILITY"] < breakout_vol_threshold) &
             (volatile_df["GROWTH"].abs() < 0.001)
         ]["SYMBOL"].head(50).tolist()
         
@@ -397,24 +886,24 @@ def run_screening(args):
         if not args.no_plots:
             # Trend/Momentum trading candidates
             if trend_candidates:
-                trend_dir = "data/processed_data/volatile_trend_trading"
+                trend_dir = os.path.join(settings.data_dir, "processed_data", "volatile_trend_trading")
                 if not args.quiet:
                     print_info(f"Generating {len(trend_candidates)} Trend/Momentum charts...")
-                create_batch_charts("Trend Trading", market, trend_candidates, data, trend_dir)
+                create_batch_charts("Trend Trading", market, trend_candidates, data, trend_dir, analysis_metadata=vol_meta)
             
             # Value/Mean-reversion trading candidates
             if value_candidates:
-                value_dir = "data/processed_data/volatile_value_trading"
+                value_dir = os.path.join(settings.data_dir, "processed_data", "volatile_value_trading")
                 if not args.quiet:
                     print_info(f"Generating {len(value_candidates)} Value/Undervalued charts...")
-                create_batch_charts("Value Trading", market, value_candidates, data, value_dir)
+                create_batch_charts("Value Trading", market, value_candidates, data, value_dir, analysis_metadata=vol_meta)
             
             # Breakout trading candidates
             if breakout_candidates:
-                breakout_dir = "data/processed_data/volatile_breakout_trading"
+                breakout_dir = os.path.join(settings.data_dir, "processed_data", "volatile_breakout_trading")
                 if not args.quiet:
                     print_info(f"Generating {len(breakout_candidates)} Breakout charts...")
-                create_batch_charts("Breakout Trading", market, breakout_candidates, data, breakout_dir)
+                create_batch_charts("Breakout Trading", market, breakout_candidates, data, breakout_dir, analysis_metadata=vol_meta)
         
         results["Volatility"] = len(volatile_symbols_top)
         results["Trend_Candidates"] = len(trend_candidates)
@@ -429,14 +918,22 @@ def run_screening(args):
         if not args.quiet:
             print_section("Breakout Screening", "🚀")
         
-        breakout_screener_out_dir = "data/processed_data/screener_breakout"
+        breakout_screener_out_dir = os.path.join(settings.data_dir, "processed_data", "screener_breakout")
         tickers_to_screen = volatile_symbols_bottom if volatile_symbols_bottom else data.get("tickers", [])
         
         # Use new modular screener
         breakout_screener = BreakoutScreener()
         price_data = data.get("price_data", {})
         batch_result = breakout_screener.screen_batch(tickers_to_screen, price_data)
+        if args.consensus:
+             for res in batch_result.results:
+                 if res.signal: # Store all signals
+                     all_screener_results[res.ticker]["breakout"] = res
+
         breakout_screener_out_symbols = [r.ticker for r in batch_result.buys]
+        
+        # Apply Base Filters (Fundamental, Sentiment)
+        breakout_screener_out_symbols = apply_filters(breakout_screener_out_symbols, args, filter_cache=global_filter_results)
         
         # Apply --top limit if specified
         if hasattr(args, 'top') and args.top and len(breakout_screener_out_symbols) > args.top:
@@ -459,8 +956,8 @@ def run_screening(args):
         if not args.quiet:
             print_section("Trend Screening", "📈")
         
-        trend_screener_out_dir = "data/processed_data/screener_trend"
-        trend_screener_history = "data/processed_data/screener_trend_history"
+        trend_screener_out_dir = os.path.join(settings.data_dir, "processed_data", "screener_trend")
+        trend_screener_history = os.path.join(settings.data_dir, "processed_data", "screener_trend_history")
         
         tickers_to_screen = volatile_symbols_top if volatile_symbols_top else data.get("tickers", [])[:200]
         
@@ -468,7 +965,22 @@ def run_screening(args):
         trend_screener = TrendlineScreener(lookback_days=screener_dur)
         price_data = data.get("price_data", {})
         batch_result = trend_screener.screen_batch(tickers_to_screen, price_data)
-        trend_screener_out_symbols = [r.ticker for r in batch_result.buys]
+        if args.consensus:
+             for res in batch_result.results:
+                 if res.signal:
+                     all_screener_results[res.ticker]["trend"] = res
+
+        trend_screener_out_symbols = []
+        for r in batch_result.buys:
+             # Strict Mode: Only Strong Up (Angle > 60)
+             if args.strict:
+                 if r.details.get("trend") == "Strong Up":
+                     trend_screener_out_symbols.append(r.ticker)
+             else:
+                 trend_screener_out_symbols.append(r.ticker)
+        
+        # Apply Base Filters (Fundamental, Sentiment)
+        trend_screener_out_symbols = apply_filters(trend_screener_out_symbols, args, filter_cache=global_filter_results)
         
         # Apply --top limit if specified
         if hasattr(args, 'top') and args.top and len(trend_screener_out_symbols) > args.top:
@@ -495,6 +1007,102 @@ def run_screening(args):
                 print_warning("No trending stocks found")
         results["Trend"] = len(trend_screener_out_symbols)
     
+    # Consensus Engine
+    if args.consensus and all_screener_results:
+        if not args.quiet:
+            print_section("Consensus Analysis", "🧠")
+            
+        consensus_engine = ConsensusEngine()
+        consensus_results = []
+        
+        # Iterate over all tickers that appeared in any screener
+        all_tickers = list(all_screener_results.keys())
+        
+        for ticker in all_tickers:
+            screener_res = all_screener_results[ticker]
+            # Only consider if there's at least one BUY signal
+            if not any(r.signal == 1 for r in screener_res.values()):
+                continue
+                
+            # Optional: Calculate filter scores
+            filter_scores = {}
+            # Retrieve cached scores if available
+            if ticker in global_filter_results:
+                filter_scores = global_filter_results[ticker]
+            
+            # Note: We rely on apply_filters having populated the cache.
+            # If a ticker wasn't in the buy list of breakout/trend filters, it might not have been filtered.
+            # However, here we iterate 'all_screener_results', which contains ALL signals.
+            # But apply_filters is only run on the BUY candidates of each screener.
+            # If a ticker had a SELL signal, it wouldn't have gone through apply_filters.
+            # That's acceptable for now as we only care about consensus on potential BUYs.
+            
+            # If filters are enabled but cache missing (e.g. ticker didn't pass initial screener cut but we want consensus?)
+            # Currently apply_filters runs on the output of screeners.
+            # So if a ticker is here, it implies it was returned by at least one screener.
+            
+            # Calculate score
+            c_res = consensus_engine.calculate_score(ticker, screener_res, filter_scores)
+            
+            if c_res.score >= 0.5: # Filter weak consensus
+                consensus_results.append(c_res)
+                
+        # Sort by score
+        consensus_results.sort(key=lambda x: x.score, reverse=True)
+        
+        if consensus_results:
+            results["Consensus"] = len(consensus_results)
+            
+            from rich.table import Table
+            table = Table(title="Top Consensus Picks")
+            table.add_column("Ticker", style="cyan")
+            table.add_column("Score", style="magenta")
+            table.add_column("Rec", style="green")
+            table.add_column("Signals", style="yellow")
+            
+            for res in consensus_results[:20]:
+                signals_str = ", ".join([f"{k}:{v}" for k,v in res.signals.items()])
+                table.add_row(
+                    res.ticker,
+                    f"{res.score:.2f}",
+                    res.recommendation,
+                    signals_str
+                )
+            console.print(table)
+            
+            if not args.quiet:
+                print_success(f"Identified {len(consensus_results)} consensus candidates")
+                
+            # Send Email for Consensus
+            if not args.no_plots:
+                 consensus_dir = os.path.join(settings.data_dir, "processed_data", "consensus_picks")
+                 if not args.quiet:
+                     print_info(f"Generating Consensus charts...")
+                 
+                 # Prepare metadata
+                 consensus_meta = {}
+                 for res in consensus_results:
+                     meta = {
+                         "Score": f"{res.score:.2f}",
+                         "Signal": res.recommendation
+                     }
+                     # Add Volatility metrics if available
+                     if 'vol_meta' in locals() and res.ticker in vol_meta:
+                         meta.update(vol_meta[res.ticker])
+                     consensus_meta[res.ticker] = meta
+                 
+                 create_batch_charts(
+                     "Consensus Picks", 
+                     market, 
+                     [r.ticker for r in consensus_results[:50]], 
+                     data, 
+                     consensus_dir,
+                     analysis_metadata=consensus_meta
+                 )
+        else:
+            if not args.quiet:
+                print_warning("No strong consensus found")
+
     # Summary
     if not args.quiet:
         screeners_run = [s for s in ["Volatility", "Breakout", "Trend"] if s in results]
@@ -505,7 +1113,7 @@ def run_screening(args):
             results=results
         )
         
-        console.print("\n[dim]Reports saved to data/processed_data/[/dim]")
+        console.print(f"\n[dim]Reports saved to {os.path.join(settings.data_dir, 'processed_data')}[/dim]")
         console.print("[bold green]✨ Screening complete![/bold green]\n")
 
 

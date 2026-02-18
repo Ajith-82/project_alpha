@@ -1,0 +1,26 @@
+# Default Configuration
+# These values are loaded if not overridden by environment variables or CLI arguments.
+
+market: "us"
+data_dir: "data"
+cache_ttl_hours: 24
+
+model:
+  order: 2
+  correlation_order: 52
+  learning_rate: 0.01
+  trend_steps: 10000
+  correlation_steps: 50000
+
+screeners:
+  min_volume: 100000
+  breakout:
+    selling_pressure_max: 0.40
+    oc_threshold: 1.0
+    volume_threshold: 0.5
+  trend_lookback_days: 20
+
+risk:
+  risk_per_trade: 0.01
+  atr_multiplier: 2.0
+  max_positions: 10

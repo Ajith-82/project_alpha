@@ -437,6 +437,7 @@ def create_batch_charts(
     output_dir: str,
     batch_size: int = 100,
     send_email_flag: bool = True,
+    analysis_metadata: Dict[str, Any] = None,
 ) -> List[str]:
     """
     Create charts for multiple symbols in batches.
@@ -512,15 +513,36 @@ def create_batch_charts(
                         prev_close = df["Close"].iloc[-2]
                         change_pct = ((last_close - prev_close) / prev_close) * 100
                         
-                        # Get Sector (if available in data["sectors"])
+                        # Get Sector (if available in data["sectors"] or data["company_info"])
                         sector = data.get("sectors", {}).get(symbol, "N/A")
                         
-                        summary_data.append({
+                        # Fallback to company_info if sector is missing or N/A
+                        if sector == "N/A" and "company_info" in data:
+                            info = data["company_info"].get(symbol, {})
+                            # Check for 'sector' or 'Sector' keys
+                            sector = info.get("sector", info.get("Sector", "N/A"))
+                            
+                            # Handle potential list or dict values (some providers return complex objects)
+                            if isinstance(sector, list) and sector:
+                                sector = sector[0]
+                            elif isinstance(sector, dict):
+                                sector = "N/A"
+                        
+                        item = {
                             "symbol": symbol,
                             "price": f"{last_close:.2f}",
                             "change": change_pct,
                             "sector": sector
-                        })
+                        }
+                        
+                        # Add metadata if available
+                        if analysis_metadata and symbol in analysis_metadata:
+                            meta = analysis_metadata[symbol]
+                            # Copy all metadata keys into the item
+                            for k, v in meta.items():
+                                item[k] = v
+                                
+                        summary_data.append(item)
 
                     # Generate PNGs for ALL symbols for PDF report
                     chart_files = []
@@ -552,6 +574,17 @@ def create_batch_charts(
                         # Use top 5 for inline embedding, attach PDF for full view
                         embedded_charts = chart_files[:5]
                         
+                        # Determine extra columns from summary_data keys for the HTML table
+                        base_keys = {"symbol", "price", "change", "sector"}
+                        all_keys = set()
+                        for item in summary_data:
+                            all_keys.update(item.keys())
+                        extra_columns = list(all_keys - base_keys)
+                        
+                        # Preferred order for readability in the email
+                        preferred_order = ["Score", "Signal", "Growth", "Vol", "Regime"]
+                        extra_columns.sort(key=lambda x: preferred_order.index(x) if x in preferred_order else 999)
+
                         server.send_stock_report_email(
                             subject=f"{screener_name} - {market.upper()} Report (Batch {batch_idx + 1})",
                             market=market,
@@ -559,7 +592,8 @@ def create_batch_charts(
                             summary_data=summary_data,
                             charts=embedded_charts,
                             pdf_path=pdf_path,
-                            mock=False # Set to False in production
+                            mock=False,
+                            extra_columns=extra_columns
                         )
                         
             except FileNotFoundError:
@@ -620,10 +654,17 @@ def _create_full_chart(
         )
         
         # Row 1: Price with SMAs
-        for col in ["Close", "SMA_10", "SMA_30", "SMA_50", "SMA_200"]:
+        # Row 1: Price with SMAs (Only 50 and 200 for clarity)
+        for col in ["Close", "SMA_50", "SMA_200"]:
             if col in data.columns:
+                # Style override for specific lines
+                line_style = dict(width=1.5)
+                if col == "SMA_50": line_style["color"] = "orange"
+                if col == "SMA_200": line_style["color"] = "blue"
+                if col == "Close": line_style["color"] = "black"
+                
                 fig.add_trace(
-                    go.Scatter(x=data.index, y=data[col], name=col),
+                    go.Scatter(x=data.index, y=data[col], name=col, line=line_style),
                     row=1, col=1
                 )
         
@@ -714,15 +755,12 @@ def _add_donchian_to_chart(fig: go.Figure, data: pd.DataFrame, window: int = 20)
         don_mid = (don_high + don_low) / 2
     
     fig.add_trace(
-        go.Scatter(x=data.index, y=don_high, name="Don High", line=dict(color="red", width=2, dash="dash")),
+        go.Scatter(x=data.index, y=don_high, name="Don High", line=dict(color="gray", width=1, dash="dot"), opacity=0.5),
         row=1, col=1
     )
+    # Mid band removed for clarity
     fig.add_trace(
-        go.Scatter(x=data.index, y=don_mid, name="Don Mid", line=dict(color="blue", width=2, dash="dash")),
-        row=1, col=1
-    )
-    fig.add_trace(
-        go.Scatter(x=data.index, y=don_low, name="Don Low", line=dict(color="purple", width=2, dash="dash")),
+        go.Scatter(x=data.index, y=don_low, name="Don Low", line=dict(color="gray", width=1, dash="dot"), opacity=0.5),
         row=1, col=1
     )
 
@@ -777,24 +815,77 @@ def _generate_pdf_report(
         if summary_data:
             elements.append(Paragraph("Market Summary (Top 30)", styles["Heading2"]))
             
-            # Prepare data for table
-            table_data = [["Symbol", "Price", "Change %", "Sector"]]
+            # Determine columns dynamically
+            base_keys = ["symbol", "price", "change", "sector"]
+            # Map internal keys to display names
+            header_map = {
+                "symbol": "Symbol",
+                "price": "Price",
+                "change": "Change %",
+                "sector": "Sector"
+            }
+            
+            # Find all unique keys across items
+            all_keys = set()
+            for item in summary_data:
+                all_keys.update(item.keys())
+            
+            # Identify extra columns
+            extra_keys = list(all_keys - set(base_keys))
+            # Sort extra columns: Score, Signal, Growth, Vol, Rate, Regime come first if present
+            preferred_order = ["Score", "Signal", "Growth", "Vol", "Rate", "Regime"]
+            extra_keys.sort(key=lambda x: preferred_order.index(x) if x in preferred_order else 999)
+            
+            # Final Column List (internal keys)
+            final_keys = ["symbol", "price", "change", "sector"] + extra_keys
+            
+            # Prepare Header Row
+            header_row = [header_map.get(k, k) for k in final_keys]
+            table_data = [header_row]
+            
+            # Prepare Data Rows
             for item in summary_data[:30]:
-                change_str = f"{item['change']:.2f}%"
-                if item['change'] > 0: change_str = "+" + change_str
-                table_data.append([
-                    item['symbol'],
-                    item['price'],
-                    change_str,
-                    item.get('sector', 'N/A')
-                ])
+                row = []
+                for k in final_keys:
+                    val = item.get(k, "")
+                    # Format specific keys
+                    if k == "change":
+                        try:
+                            val_f = float(val)
+                            change_str = f"{val_f:.2f}%"
+                            if val_f > 0: change_str = "+" + change_str
+                            val = change_str
+                        except: pass
+                    elif k == "sector":
+                        if val == "N/A": val = "" # Cleaner
+                    
+                    row.append(str(val))
+                table_data.append(row)
                 
-            t = Table(table_data, colWidths=[1.5*inch, 1*inch, 1*inch, 2.5*inch])
+            # Dynamic Column Widths
+            # Base widths
+            col_widths = []
+            for k in final_keys:
+                if k == "symbol": col_widths.append(1.2*inch)
+                elif k == "price": col_widths.append(0.8*inch)
+                elif k == "change": col_widths.append(0.8*inch)
+                elif k == "sector": col_widths.append(1.5*inch) # Reduced sector width to fit others
+                else: col_widths.append(0.8*inch) # Default width for extras
+            
+            # Adjust if total width exceeds page width (approx 7.5 inch available)
+            total_width = sum(col_widths)
+            max_width = 7.5 * inch
+            if total_width > max_width:
+                 scale = max_width / total_width
+                 col_widths = [w * scale for w in col_widths]
+
+            t = Table(table_data, colWidths=col_widths)
             t.setStyle(TableStyle([
                 ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor("#3498db")),
                 ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
                 ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
                 ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, -1), 8), # Reduced font size for more columns
                 ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
                 ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
                 ('GRID', (0, 0), (-1, -1), 1, colors.black),

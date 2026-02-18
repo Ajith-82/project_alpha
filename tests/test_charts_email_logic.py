@@ -23,6 +23,10 @@ price_data = {
     }, index=pd.to_datetime(["2023-01-01", "2023-01-02"]))
 }
 data = {"price_data": price_data, "sectors": {"TEST1": "Tech", "TEST2": "Finance"}}
+metadata = {
+    "TEST1": {"Growth": "0.5%", "Vol": "0.05", "Score": "9.5", "Signal": "Strong Buy"},
+    "TEST2": {"Growth": "-0.1%", "Vol": "0.15", "Score": "3.0", "Signal": "Hold"}
+}
 output_dir = "tests/test_charts_output"
 
 # Ensure config exists for the test to attempt sending
@@ -38,7 +42,8 @@ try:
         data=data,
         output_dir=output_dir,
         batch_size=10,
-        send_email_flag=True
+        send_email_flag=True,
+        analysis_metadata=metadata
     )
     print("create_batch_charts completed successfully!")
     

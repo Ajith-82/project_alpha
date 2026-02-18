@@ -10,6 +10,9 @@ from classes.Download import download
 from classes.Tools import convert_currency, extract_hierarchical_info
 from classes.Plotting import *
 from classes.Models import *
+import structlog
+
+logger = structlog.get_logger()
 
 
 def softplus(x: np.array) -> np.array:
@@ -302,15 +305,15 @@ def load_data(cache, symbols: list, market: str):
         FileNotFoundError: If cache is enabled and "data.pickle" does not exist.
     """
     if cache and os.path.exists("data.pickle"):
-        print("\nLoading last year of data...")
+        logger.info("Loading last year of data")
         with open("data.pickle", "rb") as handle:
             data = pickle.load(handle)
-        print("Data has been saved to {}/{}.".format(os.getcwd(), "data.pickle"))
+        logger.info("Data loaded from cache", path=os.path.abspath("data.pickle"))
     else:
         if symbols is None:
             with open("symbols_list.txt", "r") as my_file:
                 symbols = my_file.readlines()[0].split(" ")
-        print("\nDownloading last year of data...")
+        logger.info("Downloading last year of data")
         data = download(market, symbols)
     return data
 
@@ -354,7 +357,7 @@ def volatile(
             initial_params = pickle.load(handle)
 
     if num_stocks > 1:
-        print("\nTraining a model that discovers correlations...")
+        logger.info("Training correlation model")
         # order of the polynomial
         order = 52
 
@@ -369,15 +372,15 @@ def volatile(
         phi_m, psi_m, phi_s, psi_s, phi_i, psi_i, phi, psi = train_msis_mcs(
             logp, info, num_steps=50000
         )
+        
+        logger.info("Correlation training completed")
 
-        print("Training completed.")
-
-        print("\nEstimate top matches...")
+        logger.info("Estimating top matches")
         matches = estimate_matches(tickers, phi.numpy(), info["tt"])
+        
+        logger.info("Top matches estimation completed")
 
-        print("Top matches estimation completed.")
-
-    print("\nTraining a model that estimates and predicts trends...")
+    logger.info("Training trend prediction model")
     # how many days to look ahead when comparing the current price against a prediction
     horizon = 5
     # order of the polynomial
@@ -402,7 +405,7 @@ def volatile(
     phi_m, psi_m, phi_s, psi_s, phi_i, psi_i, phi, psi = params[:8]
     extra_params = params[8:] if len(params) > 8 else ()
 
-    print("Training completed.")
+    logger.info("Training completed")
     if args.save_model:
         with open(args.save_model, "wb") as handle:
             pickle.dump([p.numpy() for p in params], handle)
@@ -567,6 +570,8 @@ def volatile(
         # Save the DataFrame to a CSV file
         volatile_df.to_csv(tab_name, index=False)
 
-        print(f"\nThe prediction table printed above has been saved to {tab_name}.")
+        volatile_df.to_csv(tab_name, index=False)
+
+        logger.info("Prediction table saved", path=tab_name)
 
     return volatile_df

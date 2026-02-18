@@ -29,6 +29,8 @@ from classes.DatabaseManager import (
     get_company_info,
 )
 from classes.Tools import ProgressBar, save_dict_with_timestamp
+import structlog
+from exceptions import DataFetchError, ConfigurationError
 
 # Try to import Rich progress components
 try:
@@ -38,7 +40,7 @@ except ImportError:
     RICH_AVAILABLE = False
 
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger()
 
 
 def _handle_start_end_dates(start, end):
@@ -78,7 +80,7 @@ def load_cache(file_prefix: str, source_dir: str = ".") -> Optional[Dict]:
     if data:
         return data
     
-    print(f"Cache not found for {file_prefix}")
+    logger.info("Cache not found", file_prefix=file_prefix)
     return {}
 
 
@@ -88,9 +90,13 @@ def download(
     start: Union[str, int] = None,
     end: Union[str, int] = None,
     interval: str = "1d",
+
     db_path: str = None,
     use_rich_progress: bool = True,
+    provider: str = "yfinance",
+    api_key: str = None,
 ) -> Dict[str, Union[List[str], Dict[str, pd.DataFrame], Dict[str, str]]]:
+
     """
     Download historical data for tickers with Rich progress support.
     
@@ -142,15 +148,19 @@ def download(
         elif not progress:
             # Fallback to simple progress
             if completed % 50 == 0 or completed == total:
-                print(f"Downloaded {completed}/{total} stocks...")
+                logger.info("Download progress", completed=completed, total=total)
     
     # Create fetcher with retry logic
     fetcher = StockFetcher(
         max_retries=3,
         retry_delays=[1, 2, 4],
         progress_callback=progress_callback,
+
         verbose=False,
+        provider_name=provider,
+        api_key=api_key,
     )
+
     
     # Fetch batch
     results = fetcher.fetch_batch(
@@ -175,9 +185,23 @@ def download(
     for ticker, result in results.items():
         if result.success and result.price_data is not None:
             # Validate price data
-            validation = validator.validate_price_data(result.price_data, ticker)
-            
-            if validation.valid:
+            # Use strict validators from src.classes.data.validators
+            try:
+                # Basic validation (NaNs, rows)
+                validation = validator.validate_price_data(result.price_data, ticker)
+                if not validation.valid:
+                     logger.warning(f"Basic validation failed for {ticker}: {validation.errors}")
+                     continue
+
+                # Strict validation (Sanity, schema)
+                from classes.data.validators import validate_data_quality, repair_data
+                
+                # Proactively repair data
+                result.price_data = repair_data(result.price_data, ticker)
+                
+                result.price_data = validate_data_quality(result.price_data, ticker)
+                
+                # If we get here, data is valid
                 price_data[ticker] = result.price_data
                 if result.company_info:
                     company_info[ticker] = result.company_info
@@ -185,8 +209,9 @@ def download(
                 # Save to database if path provided
                 if db_path:
                     _save_to_db(db_path, ticker, result.price_data, result.company_info)
-            else:
-                logger.warning(f"Invalid data for {ticker}: {validation.errors}")
+                    
+            except Exception as e:
+                logger.warning(f"Validation failed for {ticker}: {e}")
         else:
             logger.warning(f"Failed to fetch {ticker}: {result.error}")
     
@@ -288,8 +313,12 @@ def load_data(
     file_prefix: str = "",
     data_dir: str = "",
     db_path: str = None,
+
     use_rich_progress: bool = True,
+    provider: str = "yfinance",
+    api_key: str = None,
 ) -> Dict:
+
     """
     Load historical data from cache or download if not available.
     
@@ -307,7 +336,7 @@ def load_data(
     """
     # Try loading from cache
     if cache:
-        print("\nLoading historical data...")
+        logger.info("Loading historical data")
         cache_manager = CacheManager(cache_dir=data_dir)
         data = cache_manager.get(file_prefix)
         if data:
@@ -320,12 +349,20 @@ def load_data(
             with open(symbols_file_path, "r") as f:
                 symbols = f.readline().split(" ")
         else:
-            print("No symbols information to download data. Exit script.")
-            sys.exit()
+            raise ConfigurationError("No symbols information to download data (symbols_list.txt missing)")
     
     # Download data
-    print("\nDownloading historical data...")
-    data = download(market, symbols, db_path=db_path, use_rich_progress=use_rich_progress)
+    logger.info("Downloading historical data")
+
+    data = download(
+        market, 
+        symbols, 
+        db_path=db_path, 
+        use_rich_progress=use_rich_progress,
+        provider=provider,
+        api_key=api_key
+    )
+
     
     # Merge with database data if available
     if db_path:
@@ -453,8 +490,10 @@ def load_volatile_data(
     tickers = volatile_data.columns.get_level_values(0)[::2].tolist()
 
     if missing_tickers:
-        print(
-            f"\nRemoving {len(missing_tickers)} symbols due to incomplete data: {missing_tickers[:5]}..."
+        logger.warning(
+            "Removing symbols due to incomplete data", 
+            count=len(missing_tickers), 
+            examples=missing_tickers[:5]
         )
 
     currencies = [

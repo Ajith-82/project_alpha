@@ -26,9 +26,23 @@ def add_rsi_indicator(df):
 
     return df
 
+def add_adx_indicator(df):
+    from ta.trend import ADXIndicator
+    adx = ADXIndicator(high=df["High"], low=df["Low"], close=df["Adj Close"], window=14)
+    df["ADX"] = adx.adx()
+    return df
+
+def add_atr_indicator(df):
+    from ta.volatility import AverageTrueRange
+    atr = AverageTrueRange(high=df["High"], low=df["Low"], close=df["Adj Close"], window=14)
+    df["ATR"] = atr.average_true_range()
+    return df
+
 def add_indicators(df):
     df = add_sma_indicator(df)
     df = add_macd_indicator(df)
     df = add_rsi_indicator(df)
+    df = add_adx_indicator(df)
+    df = add_atr_indicator(df)
 
     return df
