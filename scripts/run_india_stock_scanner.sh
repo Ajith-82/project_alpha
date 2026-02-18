@@ -6,8 +6,10 @@ set cwd = `pwd`
 # Generate a timestamp
 TIMESTAMP=$(date +"%Y-%m-%d %H:%M:%S")
 
-# Run your Python script using poetry
-cd /data/release/project_alpha
+# Get the directory where the script is located (scripts/)
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
+# Navigate to project root (one level up)
+cd "$SCRIPT_DIR/.."
 
 LOG_FILE="./logs/project_alpha_india.log"
 
