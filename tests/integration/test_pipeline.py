@@ -13,10 +13,23 @@ def mock_args():
     args.no_plots = True
     args.rank = "growth"
     args.backtest = False
+    args.walk_forward = False
     args.quiet = True
-    # args.db_path = None # Optional
-    # args.load_model = None
-    # args.save_model = None
+    args.regime_detection = False
+    args.consensus = False
+    args.fundamental = False
+    args.sentiment = False
+    args.save_table = False
+    args.top = None
+    args.min_price = None
+    args.max_price = None
+    args.load_model = None
+    args.save_model = None
+    args.screeners = "all"
+    args.format = "table"
+    args.verbose = False
+    args.json_logs = False
+    args.log_level = "INFO"
     return args
 
 @pytest.fixture
@@ -59,6 +72,6 @@ def test_pipeline_execution(mock_args, sample_market_data):
                     # Run the function
                     run_screening(mock_args)
                     
-                    # Assertions
-                    mock_load.assert_called_once()
-                    pass
+                    # Assertions — load_data should be called once
+                    # (exact kwargs depend on mock_args and settings)
+                    assert mock_load.call_count == 1

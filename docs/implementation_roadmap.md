@@ -134,8 +134,8 @@ tests/
 
 ### TODO Checklist
 
-- [ ] **1.1.1** Create `tests/conftest.py` with shared pytest fixtures
-- [ ] **1.1.2** Create `tests/fixtures/sample_data.py` — generate synthetic OHLCV DataFrames for known patterns
+- [x] **1.1.1** Create `tests/conftest.py` with shared pytest fixtures
+- [x] **1.1.2** Create `tests/fixtures/sample_data.py` — generate synthetic OHLCV DataFrames for known patterns
   ```python
   def make_uptrend(days=60, start_price=100, daily_return=0.005):
       """Generate synthetic uptrend data for testing."""
@@ -144,17 +144,17 @@ tests/
   def make_bear_market(days=60, start_price=100, daily_return=-0.008):
       """Generate synthetic downtrend data."""
   ```
-- [ ] **1.1.3** Write `test_database_manager.py` — test CRUD, duplicate handling, empty DataFrames
-- [ ] **1.1.4** Write `test_download.py` — mock `yfinance.download()`, test retry logic, missing data handling
-- [ ] **1.1.5** Write `test_models.py` — test model I/O (save/load), verify loss decreases during training
-- [ ] **1.1.6** Write `test_breakout.py` — verify signal fires only when all 5 conditions met
-- [ ] **1.1.7** Write `test_trendline.py` — validate angle thresholds map to correct trend labels
-- [ ] **1.1.8** Write `test_macd.py` — verify crossover detection in synthetic data
-- [ ] **1.1.9** Write `test_donchian.py` — verify channel boundary signals
-- [ ] **1.1.10** Write `test_moving_average.py` — verify all 5 sub-strategies
-- [ ] **1.1.11** Write `test_pipeline.py` — integration test for full end-to-end workflow
-- [ ] **1.1.12** Write `test_data_consistency.py` — verify DB ↔ Pickle produce identical results
-- [ ] **1.1.13** Add `pytest.ini` or `pyproject.toml` pytest config with coverage thresholds
+- [x] **1.1.3** Write `test_database_manager.py` — test CRUD, duplicate handling, empty DataFrames
+- [x] **1.1.4** Write `test_download.py` — mock `yfinance.download()`, test retry logic, missing data handling
+- [x] **1.1.5** Write `test_models.py` — test model I/O (save/load), verify loss decreases during training
+- [x] **1.1.6** Write `test_breakout.py` — verify signal fires only when all 5 conditions met
+- [x] **1.1.7** Write `test_trendline.py` — validate angle thresholds map to correct trend labels
+- [x] **1.1.8** Write `test_macd.py` — verify crossover detection in synthetic data
+- [x] **1.1.9** Write `test_donchian.py` — verify channel boundary signals
+- [x] **1.1.10** Write `test_moving_average.py` — verify all 5 sub-strategies
+- [x] **1.1.11** Write `test_pipeline.py` — integration test for full end-to-end workflow
+- [x] **1.1.12** Write `test_data_consistency.py` — verify DB ↔ Pickle produce identical results
+- [x] **1.1.13** Add `pytest.ini` or `pyproject.toml` pytest config with coverage thresholds
   ```ini
   [tool.pytest.ini_options]
   minversion = "8.0"
@@ -166,7 +166,7 @@ tests/
   [tool.coverage.report]
   fail_under = 80
   ```
-- [ ] **1.1.14** Verify `pytest --cov` shows ≥ 80% coverage across core modules
+- [x] **1.1.14** Verify `pytest --cov` shows ≥ 80% coverage across core modules
 
 ### Research Notes
 
@@ -190,7 +190,7 @@ src/config/
 
 ### TODO Checklist
 
-- [ ] **1.2.1** Create `src/config/settings.py` with Pydantic `BaseSettings`
+- [x] **1.2.1** Create `src/config/settings.py` with Pydantic `BaseSettings`
   ```python
   from pydantic_settings import BaseSettings
   from pydantic import Field
@@ -233,13 +233,13 @@ src/config/
       
       model_config = {"env_file": ".env", "env_prefix": "PA_"}
   ```
-- [ ] **1.2.2** Create `.env.example` documenting all environment variables
-- [ ] **1.2.3** Refactor `VolatileConfig` to source defaults from `Settings`
-- [ ] **1.2.4** Refactor each screener's `__init__` to accept parameters from `Settings`
-- [ ] **1.2.5** Refactor `project_alpha.py` CLI arguments to use `Settings` as defaults (CLI overrides env)
-- [ ] **1.2.6** Create `defaults.yaml` for non-sensitive defaults
-- [ ] **1.2.7** Write `tests/unit/test_config.py` — test env loading, overrides, validation
-- [ ] **1.2.8** Add `.env` to `.gitignore`
+- [x] **1.2.2** Create `.env.example` documenting all environment variables
+- [x] **1.2.3** Refactor `VolatileConfig` to source defaults from `Settings`
+- [x] **1.2.4** Refactor each screener's `__init__` to accept parameters from `Settings`
+- [x] **1.2.5** Refactor `project_alpha.py` CLI arguments to use `Settings` as defaults (CLI overrides env)
+- [x] **1.2.6** Create `defaults.yaml` for non-sensitive defaults
+- [x] **1.2.7** Write `tests/unit/test_config.py` — test env loading, overrides, validation
+- [x] **1.2.8** Add `.env` to `.gitignore`
 
 ### Research Notes
 
@@ -261,7 +261,7 @@ src/exceptions.py                # Custom exception hierarchy
 
 ### TODO Checklist
 
-- [ ] **1.3.1** Create `src/logging_config.py`
+- [x] **1.3.1** Create `src/logging_config.py`
   ```python
   import structlog
   import logging
@@ -280,7 +280,7 @@ src/exceptions.py                # Custom exception hierarchy
       
       structlog.configure(processors=processors)
   ```
-- [ ] **1.3.2** Create `src/exceptions.py` with custom exception hierarchy
+- [x] **1.3.2** Create `src/exceptions.py` with custom exception hierarchy
   ```python
   class ProjectAlphaError(Exception):
       """Base exception for all application errors."""
@@ -300,13 +300,13 @@ src/exceptions.py                # Custom exception hierarchy
   class DataValidationError(ProjectAlphaError):
       """Input data failed validation."""
   ```
-- [ ] **1.3.3** Replace `print()` calls in `Download.py` with `logger.info()`/`logger.error()`
-- [ ] **1.3.4** Replace `print()` calls in `Volatile.py` with structured log calls
-- [ ] **1.3.5** Replace `print()` calls in `project_alpha.py` with structured log calls
-- [ ] **1.3.6** Replace string error returns (e.g., `return "Error: ..."`) with proper exception raising
-- [ ] **1.3.7** Add `try/except` blocks in screener batch execution with `logger.exception()`
-- [ ] **1.3.8** Add `--log-level` and `--json-logs` CLI options
-- [ ] **1.3.9** Write tests verifying log output format and exception propagation
+- [x] **1.3.3** Replace `print()` calls in `Download.py` with `logger.info()`/`logger.error()`
+- [x] **1.3.4** Replace `print()` calls in `Volatile.py` with structured log calls
+- [x] **1.3.5** Replace `print()` calls in `project_alpha.py` with structured log calls
+- [x] **1.3.6** Replace string error returns (e.g., `return "Error: ..."`) with proper exception raising
+- [x] **1.3.7** Add `try/except` blocks in screener batch execution with `logger.exception()`
+- [x] **1.3.8** Add `--log-level` and `--json-logs` CLI options
+- [x] **1.3.9** Write tests verifying log output format and exception propagation
 
 ### Research Notes
 
@@ -329,8 +329,8 @@ src/classes/risk/
 
 ### TODO Checklist
 
-- [ ] **1.4.1** Create `src/classes/risk/__init__.py` and `risk_manager.py`
-- [ ] **1.4.2** Implement `RiskConfig` dataclass sourcing defaults from `Settings` (§1.2)
+- [x] **1.4.1** Create `src/classes/risk/__init__.py` and `risk_manager.py`
+- [x] **1.4.2** Implement `RiskConfig` dataclass sourcing defaults from `Settings` (§1.2)
   ```python
   @dataclass
   class RiskConfig:
@@ -341,12 +341,12 @@ src/classes/risk/
       max_open_positions: int = 10
       trailing_stop: bool = True
   ```
-- [ ] **1.4.3** Implement ATR-based stop-loss: `stop = entry - (multiplier × ATR)`
-- [ ] **1.4.4** Implement fixed-risk position sizing: `shares = (portfolio × risk%) / (entry - stop)`
-- [ ] **1.4.5** Implement trailing stop logic (ratchets up only, never down)
-- [ ] **1.4.6** Implement portfolio-level exposure limits (max positions, sector concentration cap)
-- [ ] **1.4.7** Add `--risk-per-trade`, `--atr-multiplier`, `--max-positions` CLI options
-- [ ] **1.4.8** Create `transaction_costs.py`
+- [x] **1.4.3** Implement ATR-based stop-loss: `stop = entry - (multiplier × ATR)`
+- [x] **1.4.4** Implement fixed-risk position sizing: `shares = (portfolio × risk%) / (entry - stop)`
+- [x] **1.4.5** Implement trailing stop logic (ratchets up only, never down)
+- [x] **1.4.6** Implement portfolio-level exposure limits (max positions, sector concentration cap)
+- [x] **1.4.7** Add `--risk-per-trade`, `--atr-multiplier`, `--max-positions` CLI options
+- [x] **1.4.8** Create `transaction_costs.py`
   ```python
   @dataclass
   class TransactionCosts:
@@ -361,7 +361,7 @@ src/classes/risk/
       @classmethod
       def india_default(cls): return cls(commission_per_trade=20.0, slippage_bps=10.0, spread_bps=5.0)
   ```
-- [ ] **1.4.9** Write `tests/unit/test_risk_manager.py` and `test_transaction_costs.py`
+- [x] **1.4.9** Write `tests/unit/test_risk_manager.py` and `test_transaction_costs.py`
 
 ### Research Notes
 
@@ -384,7 +384,7 @@ src/classes/backtesting/
 
 ### TODO Checklist
 
-- [ ] **1.5.1** Create `adapter.py` — `ScreenerSignalAdapter`
+- [x] **1.5.1** Create `adapter.py` — `ScreenerSignalAdapter`
   ```python
   class ScreenerSignalAdapter:
       """Runs any BaseScreener over historical data to produce a signal array."""
@@ -392,7 +392,7 @@ src/classes/backtesting/
       def compute_signals(self, df: pd.DataFrame) -> np.ndarray:
           """Walk through df in rolling windows, call screener.screen(), return +1/0/-1."""
   ```
-- [ ] **1.5.2** Create `engine.py` — `ProjectAlphaStrategy(Strategy)`
+- [x] **1.5.2** Create `engine.py` — `ProjectAlphaStrategy(Strategy)`
   ```python
   from backtesting import Strategy, Backtest
   
@@ -413,16 +413,16 @@ src/classes/backtesting/
           elif self.signal[-1] == -1 and self.position:
               self.position.close()
   ```
-- [ ] **1.5.3** Integrate `TransactionCosts` — apply per-trade cost deduction
-- [ ] **1.5.4** Implement `run_backtest(screener, ticker, data, config) -> BacktestResult`
-- [ ] **1.5.5** Implement `run_batch_backtest(screener, tickers, data, config) -> BatchBacktestResult`
-- [ ] **1.5.6** Create `performance.py` — compute Sharpe, Sortino, max drawdown, win rate, profit factor, CAGR
-- [ ] **1.5.7** Integrate pyfolio tear sheet generation (drawdown plot, rolling Sharpe, monthly returns)
-- [ ] **1.5.8** Generate interactive HTML backtest report via `bt.plot()`
-- [ ] **1.5.9** Output per-trade P&L CSV
-- [ ] **1.5.10** Integrate into email/PDF pipeline
-- [ ] **1.5.11** Add `--backtest`, `--initial-capital`, `--benchmark SPY` CLI options
-- [ ] **1.5.12** Write integration tests using known historical data
+- [x] **1.5.3** Integrate `TransactionCosts` — apply per-trade cost deduction
+- [x] **1.5.4** Implement `run_backtest(screener, ticker, data, config) -> BacktestResult`
+- [x] **1.5.5** Implement `run_batch_backtest(screener, tickers, data, config) -> BatchBacktestResult`
+- [x] **1.5.6** Create `performance.py` — compute Sharpe, Sortino, max drawdown, win rate, profit factor, CAGR
+- [x] **1.5.7** Integrate pyfolio tear sheet generation (drawdown plot, rolling Sharpe, monthly returns)
+- [x] **1.5.8** Generate interactive HTML backtest report via `bt.plot()`
+- [x] **1.5.9** Output per-trade P&L CSV
+- [x] **1.5.10** Integrate into email/PDF pipeline
+- [x] **1.5.11** Add `--backtest`, `--initial-capital`, `--benchmark SPY` CLI options
+- [x] **1.5.12** Write integration tests using known historical data
 
 ### Research Notes
 
@@ -434,12 +434,12 @@ src/classes/backtesting/
 
 ### Phase 1 Test Plan
 
-- [ ] **1.T.1** `pytest tests/unit/ --cov=src --cov-report=html` achieves ≥ 80% coverage
-- [ ] **1.T.2** Run backtest on 1 year AAPL with BreakoutScreener — verify HTML report generates
-- [ ] **1.T.3** Verify `Settings` loads from `.env` and CLI overrides work
-- [ ] **1.T.4** Verify structured logs output valid JSON with `--json-logs`
-- [ ] **1.T.5** Smoke test: `python src/project_alpha.py --market us --backtest --top 5`
-- [ ] **1.T.6** Verify all pre-existing tests still pass (no regressions)
+- [x] **1.T.1** `pytest tests/unit/ --cov=src --cov-report=html` achieves ≥ 80% coverage
+- [x] **1.T.2** Run backtest on 1 year AAPL with BreakoutScreener — verify HTML report generates
+- [x] **1.T.3** Verify `Settings` loads from `.env` and CLI overrides work
+- [x] **1.T.4** Verify structured logs output valid JSON with `--json-logs`
+- [x] **1.T.5** Smoke test: `python src/project_alpha.py --market us --backtest --top 5`
+- [x] **1.T.6** Verify all pre-existing tests still pass (no regressions)
 
 ---
 
@@ -464,7 +464,7 @@ src/classes/data/
 
 ### TODO Checklist
 
-- [ ] **2.1.1** Create `validators.py` with OHLCV validation functions
+- [x] **2.1.1** Create `validators.py` with OHLCV validation functions
   ```python
   from src.exceptions import DataValidationError
   
@@ -487,7 +487,7 @@ src/classes/data/
           raise DataValidationError(f"{ticker}: {'; '.join(errors)}")
       return df
   ```
-- [ ] **2.1.2** Create `schemas.py` with Pydantic model for price rows
+- [x] **2.1.2** Create `schemas.py` with Pydantic model for price rows
   ```python
   from pydantic import BaseModel, validator
   
@@ -505,10 +505,10 @@ src/classes/data/
               raise ValueError("high must be >= low")
           return v
   ```
-- [ ] **2.1.3** Integrate `validate_ohlcv()` into `Download.py` after data fetch
-- [ ] **2.1.4** Add auto-repair for common issues: fill missing dates, interpolate gaps ≤ 3 days
-- [ ] **2.1.5** Log validation warnings using structured logging (§1.3)
-- [ ] **2.1.6** Write tests with intentionally malformed data
+- [x] **2.1.3** Integrate `validate_ohlcv()` into `Download.py` after data fetch
+- [x] **2.1.4** Add auto-repair for common issues: fill missing dates, interpolate gaps ≤ 3 days
+- [x] **2.1.5** Log validation warnings using structured logging (§1.3)
+- [x] **2.1.6** Write tests with intentionally malformed data
 
 ---
 
@@ -518,14 +518,14 @@ src/classes/data/
 
 ### TODO Checklist
 
-- [ ] **2.2.1** Add ADX calculation: `pandas_ta.adx(high, low, close, length=14)`
-- [ ] **2.2.2** Add ATR expansion check: `atr_current > 1.5 × atr_20d_mean`
-- [ ] **2.2.3** Add configurable thresholds: `adx_min=20`, `atr_expansion_factor=1.5` (sourced from Settings)
-- [ ] **2.2.4** Only emit BUY if existing conditions AND confirmation filters pass
-- [ ] **2.2.5** Add trendline direction filter: suppress breakouts opposite to prevailing trend
-- [ ] **2.2.6** Add optional TTM Squeeze detection (Bollinger inside Keltner)
-- [ ] **2.2.7** Update tests to cover confirmation logic
-- [ ] **2.2.8** Add edge case tests (ADX at threshold, ATR at expansion ratio)
+- [x] **2.2.1** Add ADX calculation: `pandas_ta.adx(high, low, close, length=14)`
+- [x] **2.2.2** Add ATR expansion check: `atr_current > 1.5 × atr_20d_mean`
+- [x] **2.2.3** Add configurable thresholds: `adx_min=20`, `atr_expansion_factor=1.5` (sourced from Settings)
+- [x] **2.2.4** Only emit BUY if existing conditions AND confirmation filters pass
+- [x] **2.2.5** Add trendline direction filter: suppress breakouts opposite to prevailing trend
+- [x] **2.2.6** Add optional TTM Squeeze detection (Bollinger inside Keltner)
+- [x] **2.2.7** Update tests to cover confirmation logic
+- [x] **2.2.8** Add edge case tests (ADX at threshold, ATR at expansion ratio)
 
 ### Research Notes
 
@@ -547,7 +547,7 @@ src/classes/filters/
 
 ### TODO Checklist
 
-- [ ] **2.3.1** Create `fundamental_filter.py` with Finnhub provider
+- [x] **2.3.1** Create `fundamental_filter.py` with Finnhub provider
   ```python
   import finnhub
   
@@ -560,8 +560,8 @@ src/classes/filters/
           # Suppress BUY if: net income declining AND debt/equity > 2.0
           ...
   ```
-- [ ] **2.3.2** Implement FundamentalAnalysis library as fallback provider
-- [ ] **2.3.3** Define suppression rules:
+- [x] **2.3.2** Implement FundamentalAnalysis library as fallback provider
+- [x] **2.3.3** Define suppression rules:
 
   | Signal Type | Suppress When |
   |-------------|---------------|
@@ -569,10 +569,10 @@ src/classes/filters/
   | BUY (Momentum) | Revenue declining 2+ consecutive quarters |
   | BUY (Breakout) | P/E > 100 (speculative) |
 
-- [ ] **2.3.4** Add 24-hour caching layer (fundamentals update quarterly)
-- [ ] **2.3.5** Add `--fundamental-filter` and `--finnhub-api-key` CLI options (key from Settings/env)
-- [ ] **2.3.6** Graceful fallback when API key not provided (skip filter, log warning)
-- [ ] **2.3.7** Write tests with mocked API responses
+- [x] **2.3.4** Add 24-hour caching layer (fundamentals update quarterly)
+- [x] **2.3.5** Add `--fundamental-filter` and `--finnhub-api-key` CLI options (key from Settings/env)
+- [x] **2.3.6** Graceful fallback when API key not provided (skip filter, log warning)
+- [x] **2.3.7** Write tests with mocked API responses
 
 ### Research Notes
 
@@ -587,7 +587,7 @@ src/classes/filters/
 
 ### TODO Checklist
 
-- [ ] **2.4.1** Create `sentiment_filter.py` with FinBERT pipeline
+- [x] **2.4.1** Create `sentiment_filter.py` with FinBERT pipeline
   ```python
   from transformers import pipeline
   
@@ -600,12 +600,12 @@ src/classes/filters/
           # Weighted average: positive=+1, neutral=0, negative=-1
           ...
   ```
-- [ ] **2.4.2** Implement headline fetching from `yfinance` (primary) and Finnhub (fallback)
-- [ ] **2.4.3** Implement suppression: suppress BUY if aggregate sentiment < −0.5
-- [ ] **2.4.4** Add model caching — download FinBERT once (~420 MB), reuse locally
-- [ ] **2.4.5** Add `--sentiment-filter` CLI flag (disabled by default)
-- [ ] **2.4.6** Handle no-headlines case gracefully (skip filter)
-- [ ] **2.4.7** Write tests with fixture headlines
+- [x] **2.4.2** Implement headline fetching from `yfinance` (primary) and Finnhub (fallback)
+- [x] **2.4.3** Implement suppression: suppress BUY if aggregate sentiment < −0.5
+- [x] **2.4.4** Add model caching — download FinBERT once (~420 MB), reuse locally
+- [x] **2.4.5** Add `--sentiment-filter` CLI flag (disabled by default)
+- [x] **2.4.6** Handle no-headlines case gracefully (skip filter)
+- [x] **2.4.7** Write tests with fixture headlines
 
 ### Research Notes
 
@@ -620,7 +620,7 @@ src/classes/filters/
 
 ### TODO Checklist
 
-- [ ] **2.5.1** Create `ConsensusScorer` class
+- [x] **2.5.1** Create `ConsensusScorer` class
   ```python
   WEIGHTS = {
       "volatility": 0.30, "breakout": 0.20, "trendline": 0.15,
@@ -628,23 +628,23 @@ src/classes/filters/
       "fundamental": 0.05,
   }
   ```
-- [ ] **2.5.2** Implement weighted scoring: `score = Σ(weight × signal_value × confidence)`
-- [ ] **2.5.3** Implement agreement detection (all screeners agree → high conviction)
-- [ ] **2.5.4** Implement contradiction detection (screeners disagree → HOLD)
-- [ ] **2.5.5** Output consensus ranking with per-screener breakdown
-- [ ] **2.5.6** Add `--consensus` flag, consensus column in CSV, consensus overlay on charts
-- [ ] **2.5.7** Write tests covering agreement, contradiction, missing screeners
+- [x] **2.5.2** Implement weighted scoring: `score = Σ(weight × signal_value × confidence)`
+- [x] **2.5.3** Implement agreement detection (all screeners agree → high conviction)
+- [x] **2.5.4** Implement contradiction detection (screeners disagree → HOLD)
+- [x] **2.5.5** Output consensus ranking with per-screener breakdown
+- [x] **2.5.6** Add `--consensus` flag, consensus column in CSV, consensus overlay on charts
+- [x] **2.5.7** Write tests covering agreement, contradiction, missing screeners
 
 ---
 
 ### Phase 2 Test Plan
 
-- [ ] **2.T.1** Validation catches malformed OHLCV data and raises `DataValidationError`
-- [ ] **2.T.2** Breakout confirmation reduces false signals by ≥ 30% in historical data
-- [ ] **2.T.3** Fundamental filter correctly suppresses BUY for stocks with negative earnings
-- [ ] **2.T.4** FinBERT classifies sample financial headlines correctly
-- [ ] **2.T.5** Consensus scoring arithmetic is correct
-- [ ] **2.T.6** End-to-end: `--consensus --fundamental-filter` produces valid output
+- [x] **2.T.1** Validation catches malformed OHLCV data and raises `DataValidationError`
+- [x] **2.T.2** Breakout confirmation reduces false signals by ≥ 30% in historical data
+- [x] **2.T.3** Fundamental filter correctly suppresses BUY for stocks with negative earnings
+- [x] **2.T.4** FinBERT classifies sample financial headlines correctly
+- [x] **2.T.5** Consensus scoring arithmetic is correct
+- [x] **2.T.6** End-to-end: `--consensus --fundamental-filter` produces valid output
 
 ---
 

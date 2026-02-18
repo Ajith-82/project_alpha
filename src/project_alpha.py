@@ -87,7 +87,11 @@ from classes.filters.fundamental_filter import FundamentalFilter
 from classes.filters.sentiment_filter import SentimentFilter
 from classes.backtesting.engine import BacktestEngine, ProjectAlphaStrategy
 from classes.backtesting.performance import BacktestPerformance
+from classes.backtesting.walk_forward import WalkForwardValidator
 from classes.data.news_fetcher import NewsFetcher
+
+from classes.analysis.regime import RegimeDetector
+
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from classes.output import (
     create_batch_charts,
@@ -309,11 +313,59 @@ def validate_screeners(ctx, param, value):
     default="SPY",
     help="Benchmark symbol for comparison",
 )
+@click.option(
+    "--data-provider",
+    type=click.Choice(["yfinance", "polygon"], case_sensitive=False),
+    default=settings.data_provider,
+    show_default=True,
+    help="Data provider for historical data",
+)
+@click.option(
+    "--polygon-api-key",
+    type=str,
+    default=settings.polygon_api_key,
+    envvar="PA_POLYGON_API_KEY",
+    help="API key for Polygon.io (overrides settings)",
+)
+@click.option(
+    "--regime-detection",
+    is_flag=True,
+    default=False,
+    help="Enable market regime detection (Bull/Bear/Sideways)",
+)
+@click.option(
+    "--regime-index",
+    type=str,
+    default="SPY",
+    help="Index symbol for regime detection (default: SPY)",
+)
+@click.option(
+    "--walk-forward",
+    is_flag=True,
+    default=False,
+    help="Run Walk-Forward Validation instead of single backtest",
+)
+@click.option(
+    "--wf-train-months",
+    type=int,
+    default=12,
+    help="Training window size in months for Walk-Forward Validation",
+)
+@click.option(
+    "--wf-test-months",
+    type=int,
+    default=3,
+    help="Testing window size in months for Walk-Forward Validation",
+)
 @click.version_option(version="0.1.0", prog_name="Project Alpha")
 def cli(market, symbols, screeners, rank, top, min_price, max_price, output_format,
         save_table, no_plots, plot_losses, verbose, quiet, json_logs, log_level, no_banner, cache,
         db_path, load_model, save_model, value, fundamental, sentiment, consensus, risk_per_trade, atr_multiplier, max_positions,
-        backtest, initial_capital, benchmark):
+        backtest, initial_capital, benchmark, data_provider, polygon_api_key, regime_detection, regime_index,
+        walk_forward, wf_train_months, wf_test_months):
+
+
+
     """
     🚀 **Project Alpha** - Your Day-to-Day Trading Companion
     
@@ -369,7 +421,17 @@ def cli(market, symbols, screeners, rank, top, min_price, max_price, output_form
     args.backtest = backtest
     args.initial_capital = initial_capital
     args.benchmark = benchmark
+    args.data_provider = data_provider
+    args.polygon_api_key = polygon_api_key
+    args.regime_detection = regime_detection
+    args.regime_index = regime_index
+    args.walk_forward = walk_forward
+    args.wf_train_months = wf_train_months
+    args.wf_test_months = wf_test_months
     args.settings = settings
+
+
+
     
     # Run main with enhanced args
     run_screening(args)
@@ -524,6 +586,45 @@ def run_screening(args):
     if not args.quiet:
         print_section("Loading Market Data", "📥")
     
+    # Market Regime Detection
+    if args.regime_detection:
+        if not args.quiet:
+             print_info(f"Detecting market regime using {args.regime_index}...")
+        
+        try:
+             # Load index data
+            regime_data = load_data(
+                cache, 
+                [args.regime_index], 
+                market, 
+                f"regime_{args.regime_index}", 
+                os.path.join(settings.data_dir, "historic_data", "regime"),
+                db_path=db_path,
+                provider=args.data_provider,
+                api_key=args.polygon_api_key
+            )
+            
+            if args.regime_index in regime_data["price_data"]:
+                index_df = regime_data["price_data"][args.regime_index]
+                
+                detector = RegimeDetector()
+                detector.fit(index_df)
+                
+                # Predict (get last state)
+                result = detector.predict(index_df)
+                current_regime = result["Regime"].iloc[-1]
+                
+                if not args.quiet:
+                    color = "green" if current_regime == "Bull" else "red" if current_regime == "Bear" else "yellow"
+                    print_info(f"Current Market Regime: [{color}]{current_regime}[/{color}]")
+                    
+            else:
+                 print_warning(f"Could not load data for {args.regime_index}, skipping regime detection.")
+                 
+        except Exception as e:
+            print_error(f"Regime detection failed: {e}")
+
+    
     if market == "india":
         index, symbols = Index.nse_500()
         screener_dur = 3
@@ -552,7 +653,17 @@ def run_screening(args):
         if not args.quiet:
             print_info(f"Analyzing {len(symbols)} specific symbols: {', '.join(symbols[:5])}...")
     
-    data = load_data(cache, symbols, market, file_prefix, data_dir, db_path=db_path)
+    data = load_data(
+        cache, 
+        symbols, 
+        market, 
+        file_prefix, 
+        data_dir, 
+        db_path=db_path,
+        provider=args.data_provider,
+        api_key=args.polygon_api_key
+    )
+
     
     total_stocks = len(data.get("tickers", []))
     if not args.quiet:
@@ -575,7 +686,7 @@ def run_screening(args):
     global_filter_results = {} # Cache for filter scores {ticker: {filter_name: score}}
 
     # Backtesting Mode
-    if getattr(args, 'backtest', False):
+    if getattr(args, 'backtest', False) or getattr(args, 'walk_forward', False):
         if not args.quiet:
             print_section("Backtesting Mode", "🧪")
         
@@ -593,9 +704,46 @@ def run_screening(args):
         # Limit tickers if --top is set
         if args.top:
             tickers = tickers[:args.top]
+
+        # Walk-Forward Validation
+        if getattr(args, 'walk_forward', False):
+             if not args.quiet:
+                print_info(f"Running Walk-Forward Validation on {len(tickers)} symbols...")
+                print_info(f"Window: Train {args.wf_train_months}m / Test {args.wf_test_months}m")
+            
+             for ticker in tickers: # Iterate tickers manually as WFV is per-ticker usually
+                 if ticker not in data["price_data"]:
+                     continue
+                     
+                 # Get data for ticker
+                 df = data["price_data"][ticker]
+                 if df.empty:
+                     continue
+                 
+                 try:
+                     validator = WalkForwardValidator(
+                         df, 
+                         train_period_days=args.wf_train_months*30, 
+                         test_period_days=args.wf_test_months*30,
+                         initial_capital=args.initial_capital
+                     )
+                     
+                     results = validator.validate(screener_cls)
+                     summary = validator.get_summary()
+                     
+                     if not args.quiet:
+                         print_success(f"WFV Complete for {ticker}")
+                         print(summary) # Simple print for now
+                         
+                 except Exception as e:
+                     print_error(f"WFV failed for {ticker}: {e}")
+                     
+             return # Stop after WFV for now
+
             
         if not args.quiet:
             print_info(f"Backtesting {len(tickers)} symbols with {screener_cls.__name__}...")
+
             
         # Create progress bar
         with create_download_progress() as progress:

@@ -90,9 +90,13 @@ def download(
     start: Union[str, int] = None,
     end: Union[str, int] = None,
     interval: str = "1d",
+
     db_path: str = None,
     use_rich_progress: bool = True,
+    provider: str = "yfinance",
+    api_key: str = None,
 ) -> Dict[str, Union[List[str], Dict[str, pd.DataFrame], Dict[str, str]]]:
+
     """
     Download historical data for tickers with Rich progress support.
     
@@ -151,8 +155,12 @@ def download(
         max_retries=3,
         retry_delays=[1, 2, 4],
         progress_callback=progress_callback,
+
         verbose=False,
+        provider_name=provider,
+        api_key=api_key,
     )
+
     
     # Fetch batch
     results = fetcher.fetch_batch(
@@ -305,8 +313,12 @@ def load_data(
     file_prefix: str = "",
     data_dir: str = "",
     db_path: str = None,
+
     use_rich_progress: bool = True,
+    provider: str = "yfinance",
+    api_key: str = None,
 ) -> Dict:
+
     """
     Load historical data from cache or download if not available.
     
@@ -341,7 +353,16 @@ def load_data(
     
     # Download data
     logger.info("Downloading historical data")
-    data = download(market, symbols, db_path=db_path, use_rich_progress=use_rich_progress)
+
+    data = download(
+        market, 
+        symbols, 
+        db_path=db_path, 
+        use_rich_progress=use_rich_progress,
+        provider=provider,
+        api_key=api_key
+    )
+
     
     # Merge with database data if available
     if db_path:

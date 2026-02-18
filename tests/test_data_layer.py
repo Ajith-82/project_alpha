@@ -233,24 +233,20 @@ class TestStockFetcher(unittest.TestCase):
         result = self.fetcher._unformat_ticker("AAPL", "us")
         self.assertEqual(result, "AAPL")
     
-    @patch("classes.data.DataFetcher.yf.Ticker")
-    def test_fetch_one_success(self, mock_ticker):
-        """Test successful fetch with mocked yfinance."""
+    def test_fetch_one_success(self):
+        """Test successful fetch with mocked provider."""
         # Create mock data
-        mock_history = pd.DataFrame({
+        mock_price_df = pd.DataFrame({
             "Open": [100, 101],
             "High": [105, 106],
             "Low": [99, 100],
             "Close": [104, 105],
             "Volume": [1000000, 1100000],
-            "Dividends": [0, 0],
-            "Stock Splits": [0, 0],
         }, index=pd.date_range("2024-01-01", periods=2))
         
-        mock_ticker_instance = MagicMock()
-        mock_ticker_instance.history.return_value = mock_history
-        mock_ticker_instance.info = {"sector": "Technology"}
-        mock_ticker.return_value = mock_ticker_instance
+        self.fetcher.provider = MagicMock()
+        self.fetcher.provider.fetch_data.return_value = mock_price_df
+        self.fetcher.provider.get_company_info.return_value = {"sector": "Technology"}
         
         result = self.fetcher.fetch_one("AAPL", "us", "2024-01-01", "2024-01-02")
         
@@ -259,27 +255,22 @@ class TestStockFetcher(unittest.TestCase):
         self.assertIsNotNone(result.price_data)
         self.assertEqual(result.company_info["sector"], "Technology")
     
-    @patch("classes.data.DataFetcher.yf.Ticker")
-    def test_fetch_one_empty_data(self, mock_ticker):
+    def test_fetch_one_empty_data(self):
         """Test fetch handling empty data."""
-        mock_ticker_instance = MagicMock()
-        mock_ticker_instance.history.return_value = pd.DataFrame()  # Empty
-        mock_ticker.return_value = mock_ticker_instance
+        self.fetcher.provider = MagicMock()
+        self.fetcher.provider.fetch_data.return_value = pd.DataFrame()  # Empty
         
         result = self.fetcher.fetch_one("INVALID", "us")
         
         self.assertFalse(result.success)
         self.assertIn("No data", result.error)
     
-    @patch("classes.data.DataFetcher.yf.Ticker")
-    def test_fetch_one_retry_on_error(self, mock_ticker):
+    def test_fetch_one_retry_on_error(self):
         """Test retry logic on fetch error."""
-        mock_ticker_instance = MagicMock()
-        mock_ticker_instance.history.side_effect = Exception("Network error")
-        mock_ticker.return_value = mock_ticker_instance
-        
-        # Use short delays for testing
         fetcher = StockFetcher(max_retries=2, retry_delays=[0.01, 0.02])
+        fetcher.provider = MagicMock()
+        fetcher.provider.fetch_data.side_effect = Exception("Network error")
+        
         result = fetcher.fetch_one("AAPL", "us")
         
         self.assertFalse(result.success)

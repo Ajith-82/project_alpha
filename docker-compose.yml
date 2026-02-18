@@ -1,7 +1,9 @@
 services:
   app:
-    build: .
-    image: project_alpha:latest
+    # Use image from GitHub Container Registry for deployment
+    # Replace 'username' with your GitHub username
+    image: ghcr.io/${GITHUB_REPOSITORY:-username/project_alpha}:latest
+    build: .  # Keep build context for local development convenience
     container_name: project_alpha
     restart: unless-stopped
     deploy:

@@ -8,6 +8,8 @@ class Settings(BaseSettings):
     market: Literal["us", "india"] = "us"
     data_dir: Path = Path("data")
     cache_ttl_hours: int = 24
+    data_provider: Literal["yfinance", "polygon"] = "yfinance"
+
     
     # Model
     model_order: int = 2
