@@ -562,39 +562,70 @@ def create_batch_charts(
                         except Exception as e:
                             logger.warning(f"Failed to create PNG for {symbol}: {e}")
                     
-                    # Generate PDF Report
-                    pdf_path = f"{batch_output_dir}/{screener_name}_Report.pdf"
-                    _generate_pdf_report(market, screener_name, summary_data, chart_files, pdf_path)
-
-                    # Send the rich report
+                    
+                    # Sort summary data by change % descending for the report
                     if summary_data:
-                        # Sort summary data by change % descending for the report
                         summary_data.sort(key=lambda x: x['change'], reverse=True)
-                        
-                        # Use top 5 for inline embedding, attach PDF for full view
-                        embedded_charts = chart_files[:5]
-                        
-                        # Determine extra columns from summary_data keys for the HTML table
+
+                        # Determine extra columns globally for consistency
                         base_keys = {"symbol", "price", "change", "sector"}
                         all_keys = set()
                         for item in summary_data:
                             all_keys.update(item.keys())
                         extra_columns = list(all_keys - base_keys)
-                        
-                        # Preferred order for readability in the email
+                        # Preferred order
                         preferred_order = ["Score", "Signal", "Growth", "Vol", "Regime"]
                         extra_columns.sort(key=lambda x: preferred_order.index(x) if x in preferred_order else 999)
-
-                        server.send_stock_report_email(
-                            subject=f"{screener_name} - {market.upper()} Report (Batch {batch_idx + 1})",
-                            market=market,
-                            category=screener_name,
-                            summary_data=summary_data,
-                            charts=embedded_charts,
-                            pdf_path=pdf_path,
-                            mock=False,
-                            extra_columns=extra_columns
-                        )
+                        
+                        # Email Splitting Logic
+                        MAX_PER_EMAIL = 50
+                        total_items = len(summary_data)
+                        num_parts = (total_items + MAX_PER_EMAIL - 1) // MAX_PER_EMAIL
+                        
+                        for i in range(num_parts):
+                            start_idx = i * MAX_PER_EMAIL
+                            end_idx = min((i + 1) * MAX_PER_EMAIL, total_items)
+                            
+                            chunk_data = summary_data[start_idx:end_idx]
+                            
+                            # Filter charts for this chunk
+                            # Assumes chart filename contains symbol. Check construction: f"{batch_output_dir}/{symbol}.png"
+                            chunk_symbols = {item['symbol'] for item in chunk_data}
+                            chunk_chart_files = []
+                            for f in chart_files:
+                                fname = os.path.basename(f) 
+                                ticker = os.path.splitext(fname)[0]
+                                if ticker in chunk_symbols:
+                                    chunk_chart_files.append(f)
+                            
+                            # Generate Part PDF
+                            part_suffix = ""
+                            subject_suffix = ""
+                            cat_suffix = ""
+                            if num_parts > 1:
+                                part_suffix = f"_Part{i+1}"
+                                subject_suffix = f" [Part {i+1}/{num_parts}]"
+                                cat_suffix = f" (Part {i+1})"
+                                
+                            pdf_path = f"{batch_output_dir}/{screener_name}_Report{part_suffix}.pdf"
+                            
+                            # Generate PDF for this chunk
+                            pdf_title = screener_name + cat_suffix
+                            _generate_pdf_report(market, pdf_title, chunk_data, chunk_chart_files, pdf_path)
+        
+                            # Embedded charts for this email (Top 5 of this chunk)
+                            embedded_charts = chunk_chart_files[:5]
+        
+                            server.send_stock_report_email(
+                                subject=f"{screener_name} - {market.upper()} Report{subject_suffix}",
+                                market=market,
+                                category=f"{screener_name}{cat_suffix}",
+                                summary_data=chunk_data,
+                                charts=embedded_charts,
+                                pdf_path=pdf_path,
+                                mock=False,
+                                extra_columns=extra_columns
+                            )
                         
             except FileNotFoundError:
                 logger.debug("Email config not found, skipping email")
