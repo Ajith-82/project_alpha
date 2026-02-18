@@ -162,6 +162,7 @@ class EmailServer:
         pdf_path: Optional[str] = None,
         recipients: Optional[List[str]] = None,
         mock: bool = True,
+        extra_columns: Optional[List[str]] = None,
     ) -> bool:
         """
         Send a formatted stock report email with summary table and embedded charts.
@@ -184,6 +185,12 @@ class EmailServer:
         MAX_EMBEDDED_CHARTS = 5
         embedded_charts = charts[:MAX_EMBEDDED_CHARTS]
         
+        # Prepare dynamic columns
+        extra_columns = extra_columns or []
+        extra_headers = ""
+        for col in extra_columns:
+             extra_headers += f'<th style="padding: 10px; text-align: center;">{col}</th>'
+        
         # Build HTML Body
         html_body = f"""
         <html>
@@ -201,6 +208,7 @@ class EmailServer:
                             <th style="padding: 10px; text-align: left;">Symbol</th>
                             <th style="padding: 10px; text-align: right;">Price</th>
                             <th style="padding: 10px; text-align: right;">Change</th>
+                            {extra_headers}
                             <th style="padding: 10px; text-align: left;">Sector</th>
                         </tr>
                     </thead>
@@ -217,6 +225,10 @@ class EmailServer:
                             <td style="padding: 10px; font-weight: bold;">{item['symbol']}</td>
                             <td style="padding: 10px; text-align: right;">{item['price']}</td>
                             <td style="padding: 10px; text-align: right; color: {change_color};">{change_str}</td>
+                            
+                            <!-- Dynamic Cells -->
+                            { "".join([f'<td style="padding: 10px; text-align: center;">{item.get(col, "")}</td>' for col in extra_columns]) }
+                            
                             <td style="padding: 10px;">{item.get('sector', 'N/A')}</td>
                         </tr>
             """

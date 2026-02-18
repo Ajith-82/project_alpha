@@ -357,12 +357,13 @@ def validate_screeners(ctx, param, value):
     default=3,
     help="Testing window size in months for Walk-Forward Validation",
 )
+@click.option("--strict", is_flag=True, help="Enable stricter filtering for high-quality signals only")
 @click.version_option(version="0.1.0", prog_name="Project Alpha")
 def cli(market, symbols, screeners, rank, top, min_price, max_price, output_format,
         save_table, no_plots, plot_losses, verbose, quiet, json_logs, log_level, no_banner, cache,
         db_path, load_model, save_model, value, fundamental, sentiment, consensus, risk_per_trade, atr_multiplier, max_positions,
         backtest, initial_capital, benchmark, data_provider, polygon_api_key, regime_detection, regime_index,
-        walk_forward, wf_train_months, wf_test_months):
+        walk_forward, wf_train_months, wf_test_months, strict):
 
 
 
@@ -428,6 +429,7 @@ def cli(market, symbols, screeners, rank, top, min_price, max_price, output_form
     args.walk_forward = walk_forward
     args.wf_train_months = wf_train_months
     args.wf_test_months = wf_test_months
+    args.strict = strict
     args.settings = settings
 
 
@@ -576,6 +578,7 @@ def run_screening(args):
     db_path = args.db_path
     results = {}  # Track screener results
     screeners_to_run = args.screeners if hasattr(args, 'screeners') else ["all"]
+    current_regime = "Unknown"
     
     # Cleanup report directories
     tools.cleanup_directory_files(os.path.join(settings.data_dir, "processed_data"))
@@ -834,6 +837,18 @@ def run_screening(args):
         
         volatile_data = load_volatile_data(market, data)
         volatile_df = volatile(args, volatile_data)
+        
+        # Prepare metadata for emails
+        vol_meta = {}
+        if not volatile_df.empty:
+            for _, row in volatile_df.iterrows():
+                vol_meta[row["SYMBOL"]] = {
+                    "Growth": f"{row['GROWTH']:.4f}",
+                    "Vol": f"{row['VOLATILITY']:.4f}",
+                    "Rate": row["RATE"],
+                    "Regime": current_regime
+                }
+
         volatile_symbols_top = volatile_df["SYMBOL"].head(200).tolist()
         volatile_symbols_bottom = volatile_df["SYMBOL"].tail(200).tolist()
         
@@ -846,8 +861,11 @@ def run_screening(args):
         # 2. VALUE (Mean-reversion): BELOW TREND or HIGHLY BELOW TREND (undervalued)
         # 3. BREAKOUT: Low VOLATILITY + ALONG TREND (consolidating, ready to break)
         
+        trend_threshold = 0.003 if args.strict else 0.001
+        breakout_vol_threshold = 0.10 if args.strict else 0.15
+        
         trend_candidates = volatile_df[
-            (volatile_df["GROWTH"] > 0.001) & 
+            (volatile_df["GROWTH"] > trend_threshold) & 
             (volatile_df["VOLATILITY"] > 0.10)
         ]["SYMBOL"].head(50).tolist()
         
@@ -857,7 +875,7 @@ def run_screening(args):
         
         breakout_candidates = volatile_df[
             (volatile_df["RATE"] == "ALONG TREND") & 
-            (volatile_df["VOLATILITY"] < 0.15) &
+            (volatile_df["VOLATILITY"] < breakout_vol_threshold) &
             (volatile_df["GROWTH"].abs() < 0.001)
         ]["SYMBOL"].head(50).tolist()
         
@@ -871,21 +889,21 @@ def run_screening(args):
                 trend_dir = os.path.join(settings.data_dir, "processed_data", "volatile_trend_trading")
                 if not args.quiet:
                     print_info(f"Generating {len(trend_candidates)} Trend/Momentum charts...")
-                create_batch_charts("Trend Trading", market, trend_candidates, data, trend_dir)
+                create_batch_charts("Trend Trading", market, trend_candidates, data, trend_dir, analysis_metadata=vol_meta)
             
             # Value/Mean-reversion trading candidates
             if value_candidates:
                 value_dir = os.path.join(settings.data_dir, "processed_data", "volatile_value_trading")
                 if not args.quiet:
                     print_info(f"Generating {len(value_candidates)} Value/Undervalued charts...")
-                create_batch_charts("Value Trading", market, value_candidates, data, value_dir)
+                create_batch_charts("Value Trading", market, value_candidates, data, value_dir, analysis_metadata=vol_meta)
             
             # Breakout trading candidates
             if breakout_candidates:
                 breakout_dir = os.path.join(settings.data_dir, "processed_data", "volatile_breakout_trading")
                 if not args.quiet:
                     print_info(f"Generating {len(breakout_candidates)} Breakout charts...")
-                create_batch_charts("Breakout Trading", market, breakout_candidates, data, breakout_dir)
+                create_batch_charts("Breakout Trading", market, breakout_candidates, data, breakout_dir, analysis_metadata=vol_meta)
         
         results["Volatility"] = len(volatile_symbols_top)
         results["Trend_Candidates"] = len(trend_candidates)
@@ -952,7 +970,14 @@ def run_screening(args):
                  if res.signal:
                      all_screener_results[res.ticker]["trend"] = res
 
-        trend_screener_out_symbols = [r.ticker for r in batch_result.buys]
+        trend_screener_out_symbols = []
+        for r in batch_result.buys:
+             # Strict Mode: Only Strong Up (Angle > 60)
+             if args.strict:
+                 if r.details.get("trend") == "Strong Up":
+                     trend_screener_out_symbols.append(r.ticker)
+             else:
+                 trend_screener_out_symbols.append(r.ticker)
         
         # Apply Base Filters (Fundamental, Sentiment)
         trend_screener_out_symbols = apply_filters(trend_screener_out_symbols, args, filter_cache=global_filter_results)
@@ -1047,6 +1072,33 @@ def run_screening(args):
             
             if not args.quiet:
                 print_success(f"Identified {len(consensus_results)} consensus candidates")
+                
+            # Send Email for Consensus
+            if not args.no_plots:
+                 consensus_dir = os.path.join(settings.data_dir, "processed_data", "consensus_picks")
+                 if not args.quiet:
+                     print_info(f"Generating Consensus charts...")
+                 
+                 # Prepare metadata
+                 consensus_meta = {}
+                 for res in consensus_results:
+                     meta = {
+                         "Score": f"{res.score:.2f}",
+                         "Signal": res.recommendation
+                     }
+                     # Add Volatility metrics if available
+                     if 'vol_meta' in locals() and res.ticker in vol_meta:
+                         meta.update(vol_meta[res.ticker])
+                     consensus_meta[res.ticker] = meta
+                 
+                 create_batch_charts(
+                     "Consensus Picks", 
+                     market, 
+                     [r.ticker for r in consensus_results[:50]], 
+                     data, 
+                     consensus_dir,
+                     analysis_metadata=consensus_meta
+                 )
         else:
             if not args.quiet:
                 print_warning("No strong consensus found")
