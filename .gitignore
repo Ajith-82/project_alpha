@@ -17,6 +17,6 @@ plots/
 *.pdf
 *.png
 logs/
-data/
+/data/
 email_config.json
 tests/*_output*
