@@ -17,7 +17,16 @@ LOG_FILE="./logs/project_alpha_india.log"
 {
   echo "Script started at: $TIMESTAMP"
   echo "------------------"
-  poetry run python ./src/project_alpha.py --market india --strict
+  mkdir -p ./data/models
+  poetry run python ./src/project_alpha.py \
+    --market india \
+    --strict \
+    --consensus \
+    --regime-detection \
+    --sentiment \
+    --save-model ./data/models/volatility_india.pkl \
+    --top 30 \
+    --rank rate
   echo "------------------"
   echo "Script finished at: $(date +'%Y-%m-%d %H:%M:%S')"
 } >> "$LOG_FILE" 2>&1

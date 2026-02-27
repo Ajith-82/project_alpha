@@ -23,7 +23,19 @@ cd "$PROJECT_DIR" || exit 1
 
 # Activate poetry env and run
 # Note: --cache forces data refresh, --screeners volatility runs the new categorized analysis
-poetry run python src/project_alpha.py --market "$MARKET" --screeners volatility --cache >> "$LOG_FILE" 2>&1
+# Load pre-trained volatility model if available (avoids retraining from scratch each run)
+MODEL_FILE="$PROJECT_DIR/data/models/volatility_${MARKET}.pkl"
+MODEL_FLAG=""
+if [ -f "$MODEL_FILE" ]; then
+    MODEL_FLAG="--load-model $MODEL_FILE"
+fi
+
+poetry run python src/project_alpha.py \
+    --market "$MARKET" \
+    --screeners volatility \
+    --cache \
+    --consensus \
+    $MODEL_FLAG >> "$LOG_FILE" 2>&1
 
 EXIT_CODE=$?
 
